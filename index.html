@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>NEXUS - Infraestrutura Cognitiva Universal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="NEXUS: infraestrutura cognitiva universal para visualizar redes de agentes, evidencias e memoria distribuida.">
+<meta name="theme-color" content="#020308">
+<meta property="og:title" content="NEXUS - Infraestrutura Cognitiva Universal">
+<meta property="og:description" content="Uma experiencia web 3D para explorar um ecossistema cognitivo modular.">
+<meta property="og:type" content="website">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-0:#020308;
+    --hi-a:#7cf3ff;
+    --hi-b:#c9b8ff;
+    --gold:#ffd479;
+    --law:#aab4d6;
+    --ink:#e2e8f4;
+    --ink-dim:#7684a0;
+    --line:rgba(150,175,220,0.16);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg-0);overflow:hidden;font-family:'JetBrains Mono',monospace;}
+  #canvas-wrap{position:fixed;inset:0;}
+  canvas{display:block;touch-action:none;}
+  .hud{position:fixed;pointer-events:none;color:var(--ink);z-index:10;}
+  .hud a,.hud button{pointer-events:auto;}
+
+  #title{top:22px;left:24px;max-width:450px;}
+  #title .logo-container {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+  }
+  #title h1{
+    font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:36px;letter-spacing:0.15em;margin:0;
+    color: #e2e8f4;
+    text-shadow: 0 0 10px rgba(255,255,255,0.1);
+  }
+  #title h1 .x-gradient {
+    background:linear-gradient(90deg, #18c5e6, #a180ff, #ffb347);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow: none;
+    font-weight: 700;
+  }
+  #title .tagline {
+    font-family:'JetBrains Mono',monospace;
+    font-size: 8px;
+    letter-spacing: 0.25em;
+    color: var(--ink-dim);
+    margin-top: 6px;
+    text-transform: uppercase;
+    position: relative;
+    padding-bottom: 8px;
+  }
+  #title .tagline::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, #18c5e6, #a180ff, #ffb347);
+    opacity: 0.6;
+    box-shadow: 0 0 8px rgba(161,128,255,0.4);
+  }
+  #title p{margin:0 0 8px 0;font-size:10.3px;color:var(--ink-dim);line-height:1.55;letter-spacing:0.01em;}
+  #lawticker{
+    font-size:9.5px;color:var(--law);letter-spacing:0.04em;border-top:1px solid var(--line);padding-top:7px;
+    transition:opacity .5s ease;min-height:26px;line-height:1.4;
+  }
+
+  #panel{top:22px;right:24px;width:225px;text-align:right;}
+  #panel .lbl{font-size:9px;color:var(--ink-dim);letter-spacing:0.12em;margin-bottom:5px;}
+  #panel .track{height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;}
+  #panel .fill{height:100%;width:20%;background:linear-gradient(90deg,var(--law),var(--hi-a),var(--gold));transition:width .3s ease;}
+  #panel .readout{font-size:10px;color:var(--ink);margin-top:7px;letter-spacing:0.03em;min-height:14px;}
+  #panel .readout b{color:var(--gold);}
+  #panel .scaleline{font-size:9px;color:var(--ink-dim);margin-top:5px;letter-spacing:0.08em;}
+  #panel .scaleline b{color:var(--ink);}
+  #panel .memlegend{font-size:8.3px;color:var(--ink-dim);margin-top:10px;line-height:1.6;letter-spacing:0.02em;border-top:1px solid var(--line);padding-top:8px;}
+
+  #scalebar{bottom:22px;left:24px;right:24px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;}
+  #breadcrumb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:64%;}
+  .crumb{
+    font-size:11px;letter-spacing:0.03em;color:var(--ink-dim);background:rgba(255,255,255,0.03);
+    border:1px solid var(--line);padding:5px 10px;border-radius:2px;cursor:pointer;transition:all .15s ease;white-space:nowrap;
+  }
+  .crumb:hover{border-color:var(--hi-a);color:var(--ink);}
+  .crumb.active{color:var(--bg-0);background:var(--hi-a);border-color:var(--hi-a);font-weight:500;}
+  .crumb-sep{color:var(--ink-dim);opacity:.4;font-size:11px;}
+
+  #controls{display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
+  #hint{font-size:10px;color:var(--ink-dim);text-align:right;letter-spacing:0.02em;line-height:1.6;}
+  #autobtn{
+    font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.06em;color:var(--ink);
+    background:rgba(255,255,255,0.03);border:1px solid var(--line);padding:8px 14px;border-radius:2px;cursor:pointer;transition:all .15s ease;
+  }
+  #autobtn:hover{border-color:var(--hi-a);}
+  #autobtn.on{background:var(--hi-a);color:var(--bg-0);border-color:var(--hi-a);font-weight:700;}
+
+  #depthflash{
+    position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+    font-family:'Space Grotesk',sans-serif;font-size:12.5px;letter-spacing:0.14em;color:var(--hi-a);
+    opacity:0;pointer-events:none;z-index:20;text-transform:uppercase;text-align:center;text-shadow:0 0 20px rgba(124,243,255,0.55);
+  }
+  #scan{
+    position:fixed;inset:0;pointer-events:none;z-index:15;opacity:0;
+    background:radial-gradient(circle at 50% 50%, rgba(255,255,255,0.0) 0%, rgba(124,243,255,0.1) 40%, rgba(255,255,255,0.4) 47%, rgba(124,243,255,0.1) 54%, rgba(0,0,0,0) 68%);
+    transform:scale(0.15);
+  }
+  #scan.pulse{ animation: scanPulse 950ms cubic-bezier(.2,.7,.3,1) forwards; }
+  @keyframes scanPulse{
+    0%{opacity:0;transform:scale(0.1);}
+    35%{opacity:1;transform:scale(1.15);}
+    100%{opacity:0;transform:scale(2.6);}
+  }
+  #loading{position:fixed;inset:0;background:var(--bg-0);z-index:100;display:flex;align-items:center;justify-content:center;color:var(--ink-dim);font-size:11px;letter-spacing:0.1em;}
+
+  #canvas-wrap{position:fixed;inset:0; transition: filter 2.5s cubic-bezier(0.2,0.8,0.2,1), transform 2.5s ease;}
+  #canvas-wrap.portal-mode { filter: blur(10px) brightness(0.25); transform: scale(1.02); }
+
+  .hud{position:fixed;pointer-events:none;color:var(--ink);z-index:10; transition: opacity 2s ease, transform 2s ease;}
+  .hud.hidden { opacity: 0; pointer-events: none; transform: translateY(10px); }
+
+  /* PORTAL CSS */
+  #nexus-portal {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; justify-content: space-between; align-items: stretch;
+    padding: 40px; color: var(--ink);
+    transition: opacity 1.5s ease, backdrop-filter 1.5s ease;
+    backdrop-filter: blur(12px);
+    background: radial-gradient(circle at center, rgba(2,3,8,0.3) 0%, rgba(2,3,8,0.85) 100%);
+  }
+  #nexus-portal.hidden { opacity: 0; pointer-events: none; backdrop-filter: blur(0px); }
+
+  .portal-col {
+    display: flex; flex-direction: column; width: 340px;
+    background: rgba(255,255,255,0.015);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+  }
+  .portal-col.center {
+    flex: 1; margin: 0 40px; align-items: center; justify-content: center;
+    background: transparent; border: none; box-shadow: none; backdrop-filter: none;
+  }
+
+  .portal-title { font-family: 'Space Grotesk', sans-serif; font-size: 14px; color: var(--hi-a); margin-bottom: 24px; letter-spacing: 0.2em; text-transform: uppercase; border-bottom: 1px solid var(--line); padding-bottom: 10px;}
+  .stat-row { display: flex; justify-content: space-between; font-size: 11px; padding: 12px 0; border-bottom: 1px dotted rgba(255,255,255,0.05); }
+  .stat-val { color: var(--gold); font-weight: bold; font-family: 'JetBrains Mono', monospace;}
+  .stat-val.cyan { color: var(--hi-a); }
+  .stat-val.purple { color: var(--hi-b); }
+
+  .hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; pointer-events: auto;}
+  .hub-item {
+    border: 1px solid var(--line); padding: 12px 8px; text-align: center; font-size: 10px; cursor: pointer; transition: all 0.2s ease; border-radius: 4px; background: rgba(0,0,0,0.2); letter-spacing: 0.05em;
+  }
+  .hub-item:hover { border-color: var(--hi-a); background: rgba(124,243,255,0.05); }
+  .hub-item.on { border-color: var(--hi-a); background: rgba(124,243,255,0.12); color: #fff; text-shadow: 0 0 5px rgba(124,243,255,0.5); box-shadow: inset 0 0 10px rgba(124,243,255,0.1);}
+
+  .enter-btn {
+    background: rgba(124,243,255,0.1); border: 1px solid var(--hi-a);
+    color: var(--hi-a); font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px; font-weight: 700; letter-spacing: 0.15em;
+    padding: 18px 40px; border-radius: 4px; cursor: pointer; pointer-events: auto;
+    transition: all 0.3s ease; text-transform: uppercase;
+    box-shadow: 0 0 20px rgba(124,243,255,0.15);
+  }
+  .enter-btn:hover {
+    background: var(--hi-a); color: var(--bg-0);
+    box-shadow: 0 0 30px rgba(124,243,255,0.4);
+  }
+
+  .profile-sel { margin-top: 24px; display: flex; flex-direction: column; gap: 8px; pointer-events: auto;}
+  .profile-sel label { font-size: 10px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  .profile-sel select { 
+    background: rgba(0,0,0,0.3); border: 1px solid var(--line); color: var(--ink); 
+    padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 11px; outline: none; border-radius: 4px; cursor: pointer;
+  }
+
+  #global-map {
+    flex: 1; margin-top: 24px; position: relative; border: 1px solid var(--line); border-radius: 4px;
+    background: radial-gradient(circle at center, rgba(124,243,255,0.05) 0%, transparent 70%);
+    overflow: hidden;
+  }
+  .pulse-dot {
+    position: absolute; width: 4px; height: 4px; background: var(--hi-a); border-radius: 50%;
+    box-shadow: 0 0 10px var(--hi-a);
+  }
+  .pulse-dot::after {
+    content: ''; position: absolute; top: -5px; left: -5px; right: -5px; bottom: -5px;
+    border: 1px solid var(--hi-a); border-radius: 50%;
+    animation: radarPulse 2s infinite cubic-bezier(0.2,0.8,0.2,1); opacity: 0;
+  }
+  @keyframes radarPulse { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(3); opacity: 0; } }
+
+  .portal-logo { text-align: center; margin-bottom: 40px; }
+  .portal-logo h1 { font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:64px;letter-spacing:0.2em;margin:0; color: #e2e8f4; text-shadow: 0 0 20px rgba(255,255,255,0.1); }
+  .portal-logo h1 .x-gradient { background:linear-gradient(90deg, #18c5e6, #a180ff, #ffb347); -webkit-background-clip:text;background-clip:text;color:transparent; text-shadow: none; font-weight: 700; }
+  .portal-logo .tagline { font-family:'JetBrains Mono',monospace; font-size: 11px; letter-spacing: 0.35em; color: var(--ink-dim); margin-top: 10px; text-transform: uppercase;}
+
+</style>
+</head>
+<body>
+
+<div id="loading">SINCRONIZANDO COM O CAMPO DE LEIS…</div>
+<div id="canvas-wrap" class="portal-mode"></div>
+
+<div id="nexus-portal">
+  <div class="portal-col">
+    <div class="portal-title">NEXUS STATUS</div>
+    <div class="stat-row"><span>TEMPO EM OPERAÇÃO</span><span class="stat-val" id="st-uptime">00:00:00</span></div>
+    <div class="stat-row"><span>FUNDAÇÃO DO PROJETO</span><span class="stat-val">2023.4</span></div>
+    <div class="stat-row"><span>UNIVERSOS ATIVOS</span><span class="stat-val cyan">1.204.892</span></div>
+    <div class="stat-row"><span>DISPOSITIVOS ONLINE</span><span class="stat-val">3.440.112</span></div>
+    <div class="stat-row"><span>AGENTES ATIVOS</span><span class="stat-val purple">8.922.401</span></div>
+    <div class="stat-row"><span>MÓDULOS INSTALADOS</span><span class="stat-val">42</span></div>
+    <div class="stat-row"><span>SAÚDE DO ECOSSISTEMA</span><span class="stat-val cyan">99.98%</span></div>
+    <div class="stat-row"><span>CONVERGÊNCIA GLOBAL</span><span class="stat-val gold" id="st-conv">84%</span></div>
+    
+    <div id="global-map">
+      <div class="pulse-dot" style="top:30%; left:25%; animation-delay: 0s;"></div>
+      <div class="pulse-dot" style="top:45%; left:40%; animation-delay: 0.5s;"></div>
+      <div class="pulse-dot" style="top:60%; left:20%; animation-delay: 1.2s;"></div>
+      <div class="pulse-dot" style="top:35%; left:75%; animation-delay: 0.8s;"></div>
+      <div class="pulse-dot" style="top:25%; left:65%; animation-delay: 0.3s;"></div>
+      <div class="pulse-dot" style="top:70%; left:80%; animation-delay: 1.5s;"></div>
+    </div>
+  </div>
+
+  <div class="portal-col center">
+    <div class="portal-logo">
+      <h1>NE<span class="x-gradient">X</span>US</h1>
+      <div class="tagline">Conectando Conhecimento • Evoluindo Inteligência</div>
+    </div>
+    <button class="enter-btn" id="btn-enter">Inicializar Universo</button>
+  </div>
+
+  <div class="portal-col">
+    <div class="portal-title">HUB DE CONEXÕES</div>
+    <div class="hub-grid">
+      <div class="hub-item on" onclick="this.classList.toggle('on')">GITHUB</div>
+      <div class="hub-item on" onclick="this.classList.toggle('on')">CLAUDE</div>
+      <div class="hub-item on" onclick="this.classList.toggle('on')">CHATGPT</div>
+      <div class="hub-item on" onclick="this.classList.toggle('on')">GEMINI</div>
+      <div class="hub-item" onclick="this.classList.toggle('on')">DEEPSEEK</div>
+      <div class="hub-item" onclick="this.classList.toggle('on')">OLLAMA</div>
+      <div class="hub-item on" onclick="this.classList.toggle('on')">MEMÓRIA VETORIAL</div>
+      <div class="hub-item" onclick="this.classList.toggle('on')">OPENCLAW</div>
+      <div class="hub-item" onclick="this.classList.toggle('on')">ROBÓTICA I/O</div>
+      <div class="hub-item on" onclick="this.classList.toggle('on')">COMPUTADOR LOCAL</div>
+    </div>
+    
+    <div class="profile-sel">
+      <label>PERFIL COGNITIVO</label>
+      <select>
+        <option>Programação</option>
+        <option>Pesquisa</option>
+        <option>Arquitetura</option>
+        <option>Engenharia</option>
+        <option>Design</option>
+        <option>Ciência</option>
+        <option>Automação</option>
+        <option>Matemática</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div id="scan"></div>
+
+<div class="hud hidden" id="title">
+  <div class="logo-container">
+    <h1>NE<span class="x-gradient">X</span>US</h1>
+    <div class="tagline">CONECTANDO CONHECIMENTO • EVOLUINDO INTELIGÊNCIA</div>
+  </div>
+  <p>O centro não é uma IA — é um campo de leis. Ele não pensa, não decide, apenas mantém a coerência. Agentes, modelos e dispositivos entram e saem; nenhum é indispensável.</p>
+  <div id="lawticker"></div>
+</div>
+
+<div class="hud hidden" id="panel">
+  <div class="lbl">CONVERGÊNCIA DE EVIDÊNCIAS</div>
+  <div class="track"><div class="fill" id="fill"></div></div>
+  <div class="readout" id="readout">buscando convergência</div>
+  <div class="scaleline">escala: <b id="scalestate">rede de agentes</b></div>
+  <div class="memlegend">memória: ativa → relevante → histórica → arquivada<br>nada se perde — apenas muda de prioridade</div>
+</div>
+
+<div class="hud hidden" id="scalebar">
+  <div id="breadcrumb"></div>
+  <div id="controls">
+    <button id="autobtn">▶ OBSERVAR PROCESSAMENTO AUTÔNOMO</button>
+    <div id="hint">arraste para orbitar · role para mudar de escala<br>clique em um agente para entrar no ecossistema interno</div>
+  </div>
+</div>
+
+<div id="depthflash"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+
+  // ================= basic setup =================
+  const wrap = document.getElementById('canvas-wrap');
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 4000);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+  wrap.appendChild(renderer.domElement);
+  window.addEventListener('resize',()=>{
+    camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
+  });
+
+  scene.add(new THREE.AmbientLight(0x445577,0.5));
+  const key=new THREE.PointLight(0x9fd8ff,2.1,60,2); key.position.set(6,8,6); scene.add(key);
+  const rim=new THREE.PointLight(0xffd479,0.7,60,2); rim.position.set(-8,-4,-6); scene.add(rim);
+
+  // ================= helpers =================
+  function radialTexture(inner,outer,size){
+    size=size||128;
+    const c=document.createElement('canvas'); c.width=c.height=size;
+    const ctx=c.getContext('2d');
+    const g=ctx.createRadialGradient(size/2,size/2,0,size/2,size/2,size/2);
+    g.addColorStop(0,inner); g.addColorStop(0.4,outer); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,size,size);
+    return new THREE.CanvasTexture(c);
+  }
+  const glowTexParticle = radialTexture('rgba(255,255,255,1)','rgba(160,210,255,0.5)',64);
+
+  function hueColor(h,s,l){ const c=new THREE.Color(); c.setHSL(((h%1)+1)%1,s,l); return c; }
+  function lerp(a,b,t){ return a+(b-a)*t; }
+  function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+  const GOLD = new THREE.Color(0xffd479);
+
+  function confColor(c){
+    const h=lerp(0.68,0.53,c), s=lerp(0.2,0.55,c), l=lerp(0.28,0.8,c);
+    const base=hueColor(h,s,l);
+    if(c>0.86){ base.lerp(GOLD,(c-0.86)/0.14*0.7); }
+    return base;
+  }
+
+  function makeLabel(text, color){
+    const canvas=document.createElement('canvas'); canvas.width=300; canvas.height=76;
+    const ctx=canvas.getContext('2d');
+    ctx.font="700 40px 'JetBrains Mono', monospace";
+    ctx.fillStyle=color||'#cfe3ff';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(text,150,38);
+    const tex=new THREE.CanvasTexture(canvas);
+    const mat=new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false, opacity:0.0});
+    const spr=new THREE.Sprite(mat);
+    spr.scale.set(0.34,0.086,1);
+    return spr;
+  }
+
+  // ================= backdrop =================
+  function buildBackdrop(){
+    const group=new THREE.Group();
+    const N=3000; const pos=new Float32Array(N*3);
+    for(let i=0;i<N;i++){
+      const r=200+Math.random()*900, theta=Math.random()*Math.PI*2, phi=Math.acos(2*Math.random()-1);
+      pos[i*3]=r*Math.sin(phi)*Math.cos(theta); pos[i*3+1]=r*Math.sin(phi)*Math.sin(theta); pos[i*3+2]=r*Math.cos(phi);
+    }
+    const geo=new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+    group.add(new THREE.Points(geo, new THREE.PointsMaterial({size:1.3,color:0xbfd6ff,transparent:true,opacity:0.7})));
+    const nebColors=['rgba(90,110,220,0.3)','rgba(40,160,200,0.28)','rgba(255,212,121,0.14)'];
+    for(let i=0;i<9;i++){
+      const tex=radialTexture(nebColors[i%3],'rgba(0,0,0,0)',256);
+      const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.45}));
+      const r=220+Math.random()*500, theta=Math.random()*Math.PI*2, phi=Math.acos(2*Math.random()-1);
+      s.position.set(r*Math.sin(phi)*Math.cos(theta), r*Math.sin(phi)*Math.sin(theta), r*Math.cos(phi));
+      const sc=180+Math.random()*260; s.scale.set(sc,sc,1);
+      group.add(s);
+    }
+    return group;
+  }
+  scene.add(buildBackdrop());
+
+  // ================= hypothesis core (inside each agent — a constructed, non-biological micro-structure) =================
+  function buildHypothesisCore(hue){
+    const g=new THREE.Group();
+    const wire=new THREE.Mesh(new THREE.IcosahedronGeometry(0.075,0), new THREE.MeshBasicMaterial({color:hueColor(hue,0.35,0.85), wireframe:true, transparent:true, opacity:0.55}));
+    g.add(wire);
+    function orbitRing(tilt,hue2){
+      const geo=new THREE.RingGeometry(0.095,0.0985,48);
+      const mat=new THREE.MeshBasicMaterial({color:hueColor(hue2,0.55,0.75), transparent:true, opacity:0.4, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false});
+      const r=new THREE.Mesh(geo,mat); r.rotation.x=tilt; return r;
+    }
+    const ring1=orbitRing(Math.PI/2.3,(hue+0.5)%1); g.add(ring1);
+    const ring2=orbitRing(-Math.PI/2.6,hue); ring2.rotation.y=Math.PI/3; g.add(ring2);
+    const motes=[];
+    for(let i=0;i<4;i++){
+      const conf=Math.random();
+      const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexParticle, color:confColor(conf), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.5+conf*0.4}));
+      const sz=0.014+conf*0.014; spr.scale.set(sz,sz,1); g.add(spr);
+      motes.push({spr,phase:Math.random()*10,speed:0.5+Math.random()*0.9,r:0.09+Math.random()*0.03});
+    }
+    g.userData.tick=(t)=>{
+      wire.rotation.y=t*0.5; wire.rotation.x=t*0.3;
+      ring1.rotation.z=t*0.4; ring2.rotation.z=-t*0.35;
+      motes.forEach(m=>{ m.spr.position.set(Math.cos(t*m.speed+m.phase)*m.r, Math.sin(t*m.speed*0.8+m.phase)*m.r*0.7, Math.sin(t*m.speed+m.phase)*m.r*0.4); });
+    };
+    return g;
+  }
+
+  // ================= tiered memory field: nothing is ever deleted, only reprioritized =================
+  const MEM_TIERS=[
+    {radius:0.155, baseOpacity:0.95, speed:1.3},
+    {radius:0.215, baseOpacity:0.55, speed:0.85},
+    {radius:0.275, baseOpacity:0.3,  speed:0.5},
+    {radius:0.335, baseOpacity:0.15, speed:0.28}
+  ];
+  function buildMemoryField(hue){
+    const g=new THREE.Group();
+    const motes=[];
+    for(let i=0;i<6;i++){
+      const tierIdx=Math.floor(Math.random()*4);
+      const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexParticle, color:hueColor(hue,0.4,0.8), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:MEM_TIERS[tierIdx].baseOpacity}));
+      spr.scale.set(0.013,0.013,1); g.add(spr);
+      motes.push({spr,tierIdx,angle:Math.random()*Math.PI*2,phase:Math.random()*10,nextShift:3+Math.random()*7});
+    }
+    g.userData.tick=(t,dt,recallBoost)=>{
+      motes.forEach(m=>{
+        m.nextShift-=dt;
+        if(m.nextShift<=0){
+          m.nextShift=4+Math.random()*9;
+          if(Math.random()<(0.55-recallBoost*0.3) && m.tierIdx<3) m.tierIdx++;
+          else if(m.tierIdx>0 && Math.random()<(0.18+recallBoost*0.6)) m.tierIdx--;
+        }
+        const tier=MEM_TIERS[m.tierIdx];
+        m.angle+=dt*tier.speed;
+        const r=tier.radius;
+        m.spr.position.set(Math.cos(m.angle+m.phase)*r, Math.sin(m.angle*0.7+m.phase)*r*0.55, Math.sin(m.angle+m.phase)*r*0.3);
+        m.spr.material.opacity=tier.baseOpacity;
+      });
+    };
+    return g;
+  }
+
+  function arcPoint(a,b,t,bulge){
+    const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+    const dir=new THREE.Vector3().subVectors(b,a);
+    const len=dir.length()||0.0001;
+    const upRef=Math.abs(dir.y)<len*0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+    const perp=new THREE.Vector3().crossVectors(dir,upRef).normalize().multiplyScalar(len*bulge);
+    const c=mid.add(perp);
+    const it=1-t;
+    return new THREE.Vector3(it*it*a.x+2*it*t*c.x+t*t*b.x, it*it*a.y+2*it*t*c.y+t*t*b.y, it*it*a.z+2*it*t*c.z+t*t*b.z);
+  }
+
+  function makeCrystalMaterial(hue,prominence){
+    return new THREE.MeshPhysicalMaterial({
+      color:hueColor(hue,0.4,0.55+prominence*0.08), metalness:0.08, roughness:0.1,
+      transmission:0.86, ior:1.4, transparent:true, opacity:0.9,
+      emissive:hueColor(hue,0.55,0.3), emissiveIntensity:0.35+prominence*0.15, clearcoat:0.65, clearcoatRoughness:0.15
+    });
+  }
+
+  // ================= fractal level =================
+  // 1 law-field (does not think, does not decide, only keeps coherence — never joins the hypothesis graph)
+  // + 8 specialized, model-agnostic agents forming a COMPLETE graph among themselves.
+  const AGENTS=8, MAX_DEPTH=7, CHILD_SCALE=0.24, CONN_SEGS=9;
+  const MODEL_POOL=['CLAUDE','GPT','GEMINI','DEEPSEEK','QWEN','LLAMA','MISTRAL','LOCAL'];
+  let clickables=[], animatedThings=[];
+  const lodRef={state:'brain'};
+
+  function buildLevel(depth){
+    const group=new THREE.Group();
+    const nodes=[]; // agents only (1..8, stored as index 0..7 here)
+
+    // ---- the law-field: not an agent, holds no hypotheses, no memory of its own ----
+    const lawGeo = new THREE.IcosahedronGeometry(0.16, 1);
+    const lawMat = new THREE.MeshBasicMaterial({color:hueColor(0.6,0.25,0.75), wireframe:true, transparent:true, opacity:0.5});
+    const lawField = new THREE.Mesh(lawGeo, lawMat);
+    group.add(lawField);
+    const lawGlow = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexParticle, color:hueColor(0.6,0.3,0.75), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.18}));
+    lawGlow.scale.set(0.7,0.7,1);
+    lawField.add(lawGlow);
+    // a second, slower counter-rotating shell — invariance, not thought
+    const lawShell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.21,0), new THREE.MeshBasicMaterial({color:hueColor(0.58,0.2,0.8), wireframe:true, transparent:true, opacity:0.22}));
+    lawField.add(lawShell);
+
+    for(let i=0;i<AGENTS;i++){
+      const hue = (i/AGENTS + depth*0.08) % 1;
+      const pos = new THREE.Vector3(Math.cos(i/AGENTS*Math.PI*2), Math.sin(i/AGENTS*Math.PI*2)*0.55, Math.sin(i/AGENTS*Math.PI*4)*0.15);
+      const geo = new THREE.IcosahedronGeometry(0.115, 2);
+      const mat = makeCrystalMaterial(hue, 0.5);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(pos);
+      group.add(mesh);
+
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexParticle, color:hueColor(hue,0.7,0.6), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.45}));
+      glow.scale.set(0.48,0.48,1);
+      mesh.add(glow);
+
+      const core = buildHypothesisCore(hue); mesh.add(core);
+      const mem = buildMemoryField(hue); mesh.add(mem);
+
+      // model-agnostic label: any agent may be served by any model/computer — the role never depends on it
+      const currentModel = MODEL_POOL[Math.floor(Math.random()*MODEL_POOL.length)];
+      const label = makeLabel(currentModel, '#cfe3ff');
+      label.position.set(0, -0.19, 0);
+      mesh.add(label);
+
+      const node = {
+        depth, i, mesh, glow, core, mem, label, currentModel,
+        basePos:pos.clone(), hue, phase:Math.random()*10, wobblePhase:Math.random()*10,
+        childGroup:null, recallBoost:0, avgConf:0.5,
+        modelTimer: 4+Math.random()*8, labelFade: 0.85, labelState:'idle'
+      };
+      mesh.userData.node = node;
+      nodes.push(node);
+      clickables.push({mesh, node});
+    }
+
+    // ---- complete graph of hypotheses among the 8 agents only — the law-field never participates ----
+    const connections=[];
+    for(let a=0;a<AGENTS;a++){
+      for(let b=a+1;b<AGENTS;b++){
+        const bulge=(Math.random()<0.5?1:-1)*(0.08+Math.random()*0.1);
+        const geo=new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((CONN_SEGS+1)*3),3));
+        const mat=new THREE.LineBasicMaterial({color:confColor(0.4), transparent:true, opacity:0.05, blending:THREE.AdditiveBlending, depthWrite:false});
+        const line=new THREE.Line(geo,mat);
+        group.add(line);
+        connections.push({a,b,bulge,line, confidence:0.15+Math.random()*0.3, target:Math.random(), nextChange:Math.random()*4});
+      }
+    }
+
+    // ---- static field spokes: the law touches every agent equally, but carries no message ----
+    const spokes = nodes.map(n=>{
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((CONN_SEGS+1)*3),3));
+      const mat = new THREE.LineBasicMaterial({color:hueColor(0.58,0.2,0.75), transparent:true, opacity:0.05, depthWrite:false});
+      const line = new THREE.Line(geo,mat);
+      group.add(line);
+      return {node:n, line};
+    });
+
+    // ---- shared field: the medium hypotheses travel through, not an emotion ----
+    const haloMat=new THREE.MeshBasicMaterial({color:hueColor(0.56+depth*0.02,0.4,0.7), wireframe:true, transparent:true, opacity:0.07});
+    const halo=new THREE.Mesh(new THREE.IcosahedronGeometry(1.55,1), haloMat);
+    group.add(halo);
+    const fieldMat=new THREE.MeshBasicMaterial({color:hueColor(0.55+depth*0.02,0.5,0.65), transparent:true, opacity:0.02, side:THREE.BackSide, blending:THREE.AdditiveBlending, depthWrite:false});
+    const field=new THREE.Mesh(new THREE.SphereGeometry(1.62,24,16), fieldMat);
+    group.add(field);
+
+    let particles=[];
+    function spawnHypothesis(fromIdx,toIdx,confidence,hops){
+      const conf = confidence!==undefined?confidence:0.2+Math.random()*0.7;
+      const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexParticle, color:confColor(conf), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.3+conf*0.65}));
+      const size=0.016+conf*0.032; spr.scale.set(size,size,1);
+      group.add(spr);
+      particles.push({spr, from:fromIdx, to:toIdx, t:0, conf, speed:0.25+conf*0.95, hops:hops||0, bulge:(Math.random()<0.5?1:-1)*(0.05+(1-conf)*0.18)});
+    }
+
+    // ---- emergent convergence: evidence aligning across agents, not social consensus ----
+    let convergence=null;
+    let nextConvergence=9+Math.random()*8;
+    function startConvergence(){
+      const targetIdx=Math.floor(Math.random()*AGENTS);
+      convergence={targetIdx, t:0, duration:3.0+Math.random()*1.2, peakConf:0};
+      nodes[targetIdx].recallBoost=1;
+    }
+
+    let readoutText='buscando convergência';
+    let activitySmoothed=0.25;
+    group.userData.getActivity=()=>activitySmoothed;
+    group.userData.getReadout=()=>readoutText;
+    group.userData.depth=depth;
+
+    animatedThings.push((t,dt)=>{
+      const connByNode = nodes.map(()=>({sum:0,count:0}));
+      connections.forEach(c=>{
+        connByNode[c.a].sum+=c.confidence; connByNode[c.a].count++;
+        connByNode[c.b].sum+=c.confidence; connByNode[c.b].count++;
+      });
+
+      let globalAvg=0;
+      nodes.forEach((n,idx)=>{
+        n.avgConf = connByNode[idx].count ? connByNode[idx].sum/connByNode[idx].count : 0.3;
+        globalAvg += n.avgConf;
+        n.recallBoost *= 0.94;
+        const instability=(1-n.avgConf);
+        const jitter=instability*0.045;
+        const pull=1-n.avgConf*0.14;
+        n.mesh.position.set(
+          n.basePos.x*pull + Math.sin(t*0.3+n.wobblePhase)*jitter,
+          n.basePos.y*pull + Math.cos(t*0.26+n.wobblePhase*1.2)*jitter,
+          n.basePos.z*pull + Math.sin(t*0.22+n.wobblePhase*0.6)*jitter*0.6
+        );
+        const scalePulse = 1 + instability*0.05*Math.sin(t*2.4+n.phase) + n.recallBoost*0.35;
+        n.mesh.scale.setScalar(scalePulse);
+        n.mesh.rotation.y = t*0.15;
+
+        if(n.core.userData.tick) n.core.userData.tick(t+n.phase);
+        if(n.mem.userData.tick) n.mem.userData.tick(t,dt,n.recallBoost);
+
+        // model-agnostic hot-swap: computers and models enter and leave; the agent's role persists
+        n.modelTimer -= dt;
+        if(n.modelTimer<=0 && n.labelState==='idle'){
+          n.labelState='fadeout';
+        }
+        if(n.labelState==='fadeout'){
+          n.labelFade -= dt*2.2;
+          if(n.labelFade<=0){
+            const choices = MODEL_POOL.filter(m=>m!==n.currentModel);
+            n.currentModel = choices[Math.floor(Math.random()*choices.length)];
+            const fresh = makeLabel(n.currentModel,'#cfe3ff');
+            fresh.position.copy(n.label.position);
+            n.mesh.remove(n.label);
+            n.label.material.map.dispose(); n.label.material.dispose();
+            n.mesh.add(fresh);
+            n.label = fresh;
+            n.labelState='fadein';
+            n.labelFade=0;
+          }
+        } else if(n.labelState==='fadein'){
+          n.labelFade += dt*2.2;
+          if(n.labelFade>=0.85){ n.labelFade=0.85; n.labelState='idle'; n.modelTimer=6+Math.random()*10; }
+        }
+        n.label.material.opacity = Math.max(0,n.labelFade);
+      });
+      globalAvg /= nodes.length;
+
+      // the law-field itself: perfectly smooth, no jitter, no hypotheses — invariant, only reflecting overall coherence
+      lawField.rotation.y = t*0.06;
+      lawShell.rotation.y = -t*0.04;
+      lawShell.rotation.x = t*0.03;
+      lawGlow.material.opacity = 0.12 + globalAvg*0.22;
+      lawMat.opacity = 0.35 + globalAvg*0.25;
+
+      // static field spokes just fade with overall coherence — they carry presence, never a message
+      spokes.forEach(s=>{
+        const p0 = lawField.position, p1 = s.node.mesh.position;
+        const posAttr = s.line.geometry.attributes.position;
+        for(let k=0;k<=CONN_SEGS;k++){
+          const tt=k/CONN_SEGS;
+          posAttr.setXYZ(k, lerp(p0.x,p1.x,tt), lerp(p0.y,p1.y,tt), lerp(p0.z,p1.z,tt));
+        }
+        posAttr.needsUpdate=true;
+        s.line.material.opacity = 0.02 + globalAvg*0.06;
+      });
+
+      let activityAccum=0;
+      connections.forEach(c=>{
+        c.nextChange -= dt;
+        if(c.nextChange<=0){
+          c.target = Math.random()<0.15 ? 0.08+Math.random()*0.15 : 0.3+Math.random()*0.65;
+          c.nextChange = 2.5+Math.random()*5;
+        }
+        if(convergence && (c.a===convergence.targetIdx || c.b===convergence.targetIdx)){
+          c.confidence = lerp(c.confidence, 0.94, 0.08);
+        } else {
+          c.confidence = lerp(c.confidence, c.target, 0.025);
+        }
+        activityAccum += c.confidence;
+
+        const pa=nodes[c.a].mesh.position, pb=nodes[c.b].mesh.position;
+        const posAttr=c.line.geometry.attributes.position;
+        for(let s=0;s<=CONN_SEGS;s++){ const p=arcPoint(pa,pb,s/CONN_SEGS,c.bulge); posAttr.setXYZ(s,p.x,p.y,p.z); }
+        posAttr.needsUpdate=true;
+        c.line.material.opacity = 0.03 + c.confidence*0.45;
+        c.line.material.color = confColor(c.confidence);
+
+        const spawnChance = c.confidence*dt*0.55;
+        if(Math.random()<spawnChance){
+          if(Math.random()<0.5) spawnHypothesis(c.a,c.b,c.confidence); else spawnHypothesis(c.b,c.a,c.confidence);
+        }
+      });
+      activitySmoothed = lerp(activitySmoothed, clamp(activityAccum/connections.length,0,1), 0.02);
+
+      const alive=[];
+      particles.forEach(pt=>{
+        pt.t += pt.speed*dt;
+        if(pt.t>=1){
+          nodes[pt.to].recallBoost = Math.max(nodes[pt.to].recallBoost, pt.conf*0.6);
+          if(pt.hops<3 && Math.random()<0.4*pt.conf){
+            const others = nodes.filter(n=>n.i!==pt.to);
+            const nxt = others[Math.floor(Math.random()*others.length)];
+            spawnHypothesis(pt.to, nxt.i, clamp(pt.conf+(Math.random()-0.4)*0.15,0.05,0.99), pt.hops+1);
+          }
+          group.remove(pt.spr); pt.spr.material.dispose();
+        } else {
+          const jitterAmt=(1-pt.conf)*0.05;
+          const jx=Math.sin(t*9+pt.hops*3.1)*jitterAmt, jy=Math.cos(t*7.3+pt.hops*1.7)*jitterAmt;
+          const pos=arcPoint(nodes[pt.from].mesh.position, nodes[pt.to].mesh.position, pt.t, pt.bulge);
+          pt.spr.position.set(pos.x+jx,pos.y+jy,pos.z);
+          pt.spr.material.opacity=(0.3+pt.conf*0.65)*(1-Math.pow(pt.t,4)*0.5);
+          alive.push(pt);
+        }
+      });
+      particles = alive;
+
+      if(!convergence){
+        nextConvergence -= dt;
+        if(nextConvergence<=0) startConvergence();
+        readoutText = 'buscando convergência';
+      } else {
+        convergence.t += dt;
+        const touching = connections.filter(c=>c.a===convergence.targetIdx||c.b===convergence.targetIdx);
+        const avg = touching.reduce((s,c)=>s+c.confidence,0)/(touching.length||1);
+        convergence.peakConf = Math.max(convergence.peakConf, avg);
+        readoutText = 'convergência emergindo — evidências alinhadas: '+Math.round(avg*100)+'%';
+        if(Math.random()<0.4*dt*3){
+          const others = nodes.filter(n=>n.i!==convergence.targetIdx);
+          const src = others[Math.floor(Math.random()*others.length)];
+          spawnHypothesis(src.i, convergence.targetIdx, 0.85+Math.random()*0.13);
+        }
+        if(convergence.t>=convergence.duration){
+          readoutText = 'convergência: '+Math.round(convergence.peakConf*100)+'% — evidências voltam a se distribuir';
+          convergence = null;
+          nextConvergence = 10+Math.random()*10;
+        }
+      }
+
+      halo.rotation.y = t*0.035; halo.rotation.x = t*0.02;
+      halo.material.opacity = 0.05 + activitySmoothed*0.14;
+      field.material.opacity = 0.012 + activitySmoothed*0.045;
+
+      const detailVisible = lodRef.state !== 'galaxy';
+      const detailScale = lodRef.state === 'molecule' ? 1.5 : 1.0;
+      nodes.forEach(n=>{
+        n.core.visible = detailVisible; n.mem.visible = detailVisible;
+        n.core.scale.setScalar(detailScale); n.mem.scale.setScalar(detailScale);
+        n.label.visible = lodRef.state !== 'galaxy';
+      });
+      connections.forEach(c=>{ c.line.visible = lodRef.state!=='galaxy' || c.confidence>0.5; });
+      lawField.visible = true;
+    });
+
+    group.lawField = lawField;
+    group.nodesList = nodes;
+    return group;
+  }
+
+  const root = buildLevel(0);
+  scene.add(root);
+
+  // ================= camera / manual orbit =================
+  const camState={target:new THREE.Vector3(0,0,0), radius:18, theta:0.6, phi:1.15, targetRadius:18, targetTheta:0.6, targetPhi:1.15};
+  function updateCameraFromState(){
+    const {target,radius,theta,phi}=camState;
+    camera.position.set(target.x+radius*Math.sin(phi)*Math.cos(theta), target.y+radius*Math.cos(phi), target.z+radius*Math.sin(phi)*Math.sin(theta));
+    camera.lookAt(target);
+  }
+  updateCameraFromState();
+
+  // Portal Logic
+  let portalActive = true;
+  document.getElementById('btn-enter').addEventListener('click', () => {
+    portalActive = false;
+    document.getElementById('nexus-portal').classList.add('hidden');
+    document.getElementById('canvas-wrap').classList.remove('portal-mode');
+    document.querySelectorAll('.hud').forEach(el => el.classList.remove('hidden'));
+    camState.targetRadius = 3.4; // Zoom in to universe
+  });
+
+  // Uptime ticker
+  const startMs = Date.now() - 1000 * 60 * 60 * 24 * 3; // fake 3 days
+  setInterval(() => {
+    if(!portalActive) return;
+    const diff = Math.floor((Date.now() - startMs) / 1000);
+    const h = String(Math.floor(diff / 3600)).padStart(2,'0');
+    const m = String(Math.floor((diff % 3600) / 60)).padStart(2,'0');
+    const s = String(diff % 60).padStart(2,'0');
+    document.getElementById('st-uptime').textContent = `${h}:${m}:${s}`;
+    document.getElementById('st-conv').textContent = Math.floor(80 + Math.random()*15) + '%';
+  }, 1000);
+
+
+  let dragging=false,lastX=0,lastY=0,dragged=false;
+  renderer.domElement.addEventListener('pointerdown',(e)=>{dragging=true;dragged=false;lastX=e.clientX;lastY=e.clientY;});
+  window.addEventListener('pointerup',(e)=>{dragging=false; if(!dragged) handleClick(e);});
+  window.addEventListener('pointermove',(e)=>{
+    if(!dragging) return;
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    if(Math.abs(dx)+Math.abs(dy)>3) dragged=true;
+    camState.targetTheta -= dx*0.005;
+    camState.targetPhi = clamp(camState.targetPhi-dy*0.005,0.25,2.85);
+    lastX=e.clientX; lastY=e.clientY;
+  });
+  renderer.domElement.addEventListener('wheel',(e)=>{
+    e.preventDefault();
+    camState.targetRadius = clamp(camState.targetRadius*(1+e.deltaY*0.001),0.28,10);
+  },{passive:false});
+
+  const raycaster=new THREE.Raycaster(), mouseNDC=new THREE.Vector2();
+  function handleClick(e){
+    mouseNDC.x=(e.clientX/innerWidth)*2-1; mouseNDC.y=-(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouseNDC,camera);
+    const hits=raycaster.intersectObjects(clickables.map(c=>c.mesh), false);
+    if(hits.length){ const entry=clickables.find(c=>c.mesh===hits[0].object); if(entry) diveInto(entry.node); }
+  }
+
+  const stack=[];
+  function worldPosOf(mesh){ const v=new THREE.Vector3(); mesh.getWorldPosition(v); return v; }
+  function flashText(msg){
+    const el=document.getElementById('depthflash');
+    el.textContent=msg; el.style.transition='none'; el.style.opacity='1';
+    requestAnimationFrame(()=>{ el.style.transition='opacity 1.6s ease'; el.style.opacity='0'; });
+  }
+  function pulseScan(){
+    const el=document.getElementById('scan');
+    el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
+  }
+
+  function diveInto(node){
+    if(node.depth+1>MAX_DEPTH){ flashText('LIMITE DE RENDERIZAÇÃO — A MESMA LEI CONTINUA EM QUALQUER ESCALA'); return; }
+    pulseScan();
+    stack.push({node, snapshot:{radius:camState.targetRadius}});
+    if(!node.childGroup){
+      const child=buildLevel(node.depth+1);
+      child.scale.setScalar(CHILD_SCALE);
+      node.mesh.add(child);
+      node.childGroup=child;
+      child.visible=false;
+    }
+    node.mesh.material.opacity=0.2; node.mesh.material.transmission=0.98;
+    node.glow.material.opacity=0.2;
+    const worldPos=worldPosOf(node.mesh);
+    animateCameraTo(worldPos, camState.targetRadius*CHILD_SCALE*3.2, ()=>{ node.childGroup.visible=true; });
+    updateBreadcrumb();
+  }
+  function zoomOutTo(index){
+    pulseScan();
+    while(stack.length>index+1){
+      const popped=stack.pop();
+      if(popped.node.childGroup) popped.node.childGroup.visible=false;
+      popped.node.mesh.material.opacity=0.9; popped.node.mesh.material.transmission=0.86;
+      popped.node.glow.material.opacity=0.45;
+    }
+    const snap = index===-1 ? {radius:3.4} : stack[stack.length-1].snapshot;
+    const targetPos = index===-1 ? new THREE.Vector3(0,0,0) : worldPosOf(stack[stack.length-1].node.mesh);
+    animateCameraTo(targetPos, snap.radius, null);
+    updateBreadcrumb();
+  }
+
+  let camTween=null;
+  function animateCameraTo(targetPos,targetRadius,onDone){
+    const startTarget=camState.target.clone(), startRadius=camState.targetRadius;
+    const t0=performance.now(), duration=1100;
+    camTween=function(now){
+      const k=Math.min(1,(now-t0)/duration);
+      const ease=k<0.5?2*k*k:-1+(4-2*k)*k;
+      camState.target.lerpVectors(startTarget,targetPos,ease);
+      camState.targetRadius = startRadius+(targetRadius-startRadius)*ease;
+      if(k>=1){ camTween=null; if(onDone) onDone(); }
+    };
+  }
+
+  function updateBreadcrumb(){
+    const el=document.getElementById('breadcrumb');
+    el.innerHTML='';
+    const items=[{label:'CAMADA 0',idx:-1}].concat(stack.map((s,i)=>({label:'CAMADA '+(i+1),idx:i})));
+    items.forEach((it,i)=>{
+      const b=document.createElement('div');
+      b.className='crumb'+(i===items.length-1?' active':'');
+      b.textContent=it.label;
+      b.addEventListener('click',()=>zoomOutTo(it.idx));
+      el.appendChild(b);
+      if(i<items.length-1){ const sep=document.createElement('div'); sep.className='crumb-sep'; sep.textContent='→'; el.appendChild(sep); }
+    });
+  }
+  updateBreadcrumb();
+
+  let autoMode=false;
+  const autobtn=document.getElementById('autobtn');
+  autobtn.addEventListener('click',()=>{
+    autoMode=!autoMode;
+    autobtn.classList.toggle('on',autoMode);
+    autobtn.textContent = autoMode?'■ PARAR':'▶ OBSERVAR PROCESSAMENTO AUTÔNOMO';
+    if(autoMode) scheduleAuto();
+  });
+  function scheduleAuto(){
+    if(!autoMode) return;
+    setTimeout(()=>{
+      if(!autoMode) return;
+      const currentGroup = stack.length ? stack[stack.length-1].node.childGroup : root;
+      if(currentGroup && currentGroup.nodesList){
+        if(stack.length>=MAX_DEPTH-1){ zoomOutTo(-1); }
+        else { diveInto(currentGroup.nodesList[Math.floor(Math.random()*currentGroup.nodesList.length)]); }
+      }
+      scheduleAuto();
+    },2700);
+  }
+
+  // ================= law ticker: the 11 fundamental laws, cycling — informative, not decorative =================
+  const LAWS = [
+    'LEI 1 — Toda informação possui origem rastreável.',
+    'LEI 2 — Toda hipótese possui grau de confiança.',
+    'LEI 3 — Toda conclusão pode ser revisada.',
+    'LEI 4 — Nenhum conhecimento é perdido.',
+    'LEI 5 — Nenhum modelo é indispensável.',
+    'LEI 6 — Nenhum agente é absoluto.',
+    'LEI 7 — Toda inteligência é distribuída.',
+    'LEI 8 — Toda evolução é modular.',
+    'LEI 9 — Toda decisão deve ser baseada em evidências.',
+    'LEI 10 — Toda arquitetura deve minimizar pontos únicos de falha.',
+    'LEI 11 — O sistema nunca afirma possuir a verdade — apenas reduz sua incerteza.'
+  ];
+  let lawIdx = 0;
+  const tickerEl = document.getElementById('lawticker');
+  function showLaw(){
+    tickerEl.style.opacity = '0';
+    setTimeout(()=>{
+      tickerEl.textContent = LAWS[lawIdx];
+      tickerEl.style.opacity = '1';
+      lawIdx = (lawIdx+1) % LAWS.length;
+    }, 400);
+  }
+  showLaw();
+  setInterval(showLaw, 6500);
+
+  // ================= render loop =================
+  const clock=new THREE.Clock();
+  document.getElementById('loading').style.display='none';
+  const fillEl=document.getElementById('fill');
+  const readoutEl=document.getElementById('readout');
+  const scaleStateEl=document.getElementById('scalestate');
+
+  function animate(){
+    requestAnimationFrame(animate);
+    const t=clock.getElapsedTime();
+    const dt=Math.min(clock.getDelta(),0.05);
+    const now=performance.now();
+
+    if(camTween) camTween(now);
+    camState.theta += (camState.targetTheta-camState.theta)*0.12;
+    camState.phi += (camState.targetPhi-camState.phi)*0.12;
+    camState.radius += (camState.targetRadius-camState.radius)*0.12;
+    updateCameraFromState();
+
+    if(camState.radius>5.4){ lodRef.state='galaxy'; scaleStateEl.textContent='galáxia de agentes'; }
+    else if(camState.radius<0.55){ lodRef.state='molecule'; scaleStateEl.textContent='ecossistema interno'; }
+    else { lodRef.state='brain'; scaleStateEl.textContent='rede de agentes'; }
+
+    animatedThings.forEach(fn=>fn(t,dt));
+
+    const focusGroup = stack.length ? stack[stack.length-1].node.childGroup : root;
+    if(focusGroup && focusGroup.userData.getActivity){
+      fillEl.style.width = Math.round(focusGroup.userData.getActivity()*100)+'%';
+      readoutEl.textContent = focusGroup.userData.getReadout();
+    }
+
+    renderer.render(scene,camera);
+  }
+  animate();
+
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
