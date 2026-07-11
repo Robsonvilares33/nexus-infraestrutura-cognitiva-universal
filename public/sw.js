@@ -1,9 +1,9 @@
-const CACHE_NAME = 'nexus-v1';
+const CACHE_NAME = 'nexus-v2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/icon.svg'
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './icon.svg'
 ];
 
 self.addEventListener('install', (event) => {

@@ -1,14 +1,14 @@
 {
-  "name": "NEXUS - Infraestrutura Cognitiva Universal",
+  "name": "NEXUS - Plataforma Cognitiva Universal",
   "short_name": "NEXUS",
-  "description": "Experiencia web 3D para explorar redes de agentes, evidencias e memoria distribuida.",
-  "start_url": "/",
+  "description": "Experiencia web para organizar missoes, agentes, modelos, plugins, memoria e visualizacoes de universo cognitivo.",
+  "start_url": ".",
   "display": "fullscreen",
   "background_color": "#020308",
   "theme_color": "#020308",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
