@@ -47,7 +47,8 @@ function injectLocalStatusCard() {
       API: <b id="local-api-state">—</b><br>
       Ollama: <b id="local-ollama-state">—</b><br>
       Modelo: <b id="local-model-state">—</b><br>
-      Missões salvas: <b id="local-missions-state">0</b> · Memórias: <b id="local-memory-state">0</b>
+      Missões salvas: <b id="local-missions-state">0</b> · Memórias: <b id="local-memory-state">0</b><br>
+      Artefatos reais: <b id="local-artifacts-state">0</b>
     </div>
   `;
   statusView.appendChild(card);
@@ -68,6 +69,7 @@ async function refreshHealth() {
     setText('local-model-state', health.ollama.preferredModel);
     setText('local-missions-state', health.stats.missions);
     setText('local-memory-state', health.stats.memories);
+    setText('local-artifacts-state', health.stats.artifacts || 0);
     const chip = document.getElementById('local-runtime-chip');
     if (chip) {
       chip.textContent = ready ? 'Executando real' : 'Fallback offline';
@@ -93,6 +95,9 @@ async function submitMissionToLocalApi() {
     });
     const mode = result.mission.plan.mode === 'ollama' ? 'IA local via Ollama' : 'planejador offline';
     feed(`Missão #${result.mission.id} salva com ${mode}. Memória #${result.memory.id} criada.`, 'mem');
+    if (result.artifact) {
+      feed(`Executor local criou artefato #${result.artifact.id}: ${result.artifact.path}`, 'tool');
+    }
     if (result.mission.plan.summary) feed(`Resumo local: ${result.mission.plan.summary}`, 'hyp');
     await refreshHealth();
   } catch (error) {

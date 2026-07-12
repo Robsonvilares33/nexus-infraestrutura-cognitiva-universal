@@ -7,6 +7,8 @@ import {
   listMissions,
   saveMemory,
   listMemories,
+  saveArtifact,
+  listArtifacts,
   setPlugin,
   listPlugins,
   saveEvent,
@@ -14,6 +16,7 @@ import {
 } from './db.js';
 import { generateMissionPlan, ollamaStatus } from './ollama.js';
 import { catalog } from './registry.js';
+import { runTool, tools } from './executor.js';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -72,6 +75,16 @@ app.get('/api/catalog', (_req, res) => {
   res.json(catalog);
 });
 
+app.get('/api/tools', (_req, res) => {
+  res.json(tools);
+});
+
+app.post('/api/tools/run', (req, res) => {
+  const result = runTool(req.body.name, req.body.input || {});
+  saveEvent('tool.run', result);
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
 app.get('/api/plugins', (_req, res) => {
   res.json(listPlugins());
 });
@@ -84,6 +97,10 @@ app.post('/api/plugins/:name/connect', (req, res) => {
 
 app.get('/api/memory', (_req, res) => {
   res.json(listMemories());
+});
+
+app.get('/api/artifacts', (_req, res) => {
+  res.json(listArtifacts());
 });
 
 app.post('/api/memory', (req, res) => {
@@ -108,15 +125,23 @@ app.post('/api/missions', async (req, res) => {
 
   const generated = await generateMissionPlan(text);
   const mission = saveMission({ text, model: generated.model, plan: generated.plan });
+  const artifactResult = runTool('artifact.create', { mission, plan: generated.plan });
+  const artifact = artifactResult.ok ? saveArtifact({
+    missionId: mission.id,
+    kind: 'mission-artifact',
+    title: artifactResult.title,
+    path: artifactResult.directory,
+    summary: artifactResult.summary
+  }) : null;
   const memory = saveMemory({
     kind: 'mission',
     title: text.slice(0, 80),
-    content: JSON.stringify(generated.plan, null, 2),
+    content: JSON.stringify({ plan: generated.plan, artifact: artifactResult }, null, 2),
     importance: generated.plan.mode === 'ollama' ? 75 : 55,
     source: generated.model
   });
-  saveEvent('mission.completed', { missionId: mission.id, memoryId: memory.id, model: generated.model });
-  res.status(201).json({ mission, memory, ollama: generated.status });
+  saveEvent('mission.completed', { missionId: mission.id, memoryId: memory.id, artifactId: artifact?.id, model: generated.model });
+  res.status(201).json({ mission, memory, artifact, artifactResult, ollama: generated.status });
 });
 
 app.use((_req, res) => {

@@ -50,6 +50,17 @@ db.exec(`
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mission_id INTEGER,
+    kind TEXT NOT NULL DEFAULT 'markdown',
+    title TEXT NOT NULL,
+    path TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE SET NULL
+  );
 `);
 
 db.prepare(`
@@ -103,6 +114,18 @@ export function listMemories() {
   return db.prepare('SELECT * FROM memories ORDER BY importance DESC, id DESC LIMIT 100').all();
 }
 
+export function saveArtifact({ missionId = null, kind = 'markdown', title, path, summary = '' }) {
+  const info = db.prepare(`
+    INSERT INTO artifacts (mission_id, kind, title, path, summary)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(missionId, kind, title, path, summary);
+  return db.prepare('SELECT * FROM artifacts WHERE id = ?').get(info.lastInsertRowid);
+}
+
+export function listArtifacts() {
+  return db.prepare('SELECT * FROM artifacts ORDER BY id DESC LIMIT 100').all();
+}
+
 export function setPlugin(name, category = 'custom', connected = true) {
   db.prepare(`
     INSERT INTO plugins (name, category, connected, updated_at)
@@ -128,6 +151,7 @@ export function stats() {
   return {
     missions: one('SELECT COUNT(*) AS count FROM missions'),
     memories: one('SELECT COUNT(*) AS count FROM memories'),
+    artifacts: one('SELECT COUNT(*) AS count FROM artifacts'),
     pluginsConnected: one('SELECT COUNT(*) AS count FROM plugins WHERE connected = 1'),
     events: one('SELECT COUNT(*) AS count FROM events')
   };
