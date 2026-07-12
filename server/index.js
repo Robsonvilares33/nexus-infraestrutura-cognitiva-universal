@@ -81,8 +81,17 @@ app.get('/api/tools', (_req, res) => {
 
 app.post('/api/tools/run', (req, res) => {
   const result = runTool(req.body.name, req.body.input || {});
+  let artifact = null;
+  if (result.ok && result.path && ['document.create', 'project.scaffold'].includes(result.tool)) {
+    artifact = saveArtifact({
+      kind: result.tool,
+      title: result.title || result.tool,
+      path: result.path,
+      summary: result.summary || ''
+    });
+  }
   saveEvent('tool.run', result);
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : 400).json({ ...result, artifact });
 });
 
 app.get('/api/plugins', (_req, res) => {

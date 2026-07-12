@@ -71,6 +71,17 @@ O build estatico sai em `dist/` e pode ser hospedado em GitHub Pages, Cloudflare
 - `GET /api/missions`
 - `POST /api/missions`
 
+## Ferramentas locais seguras
+
+Use `POST /api/tools/run` com `name` e `input`.
+
+- `workspace.summary`: lista arquivos do projeto.
+- `workspace.search`: busca texto no projeto, ignorando `.git`, `node_modules`, `dist` e `data`.
+- `file.read`: le um arquivo especifico do projeto com limite de tamanho.
+- `document.create`: cria um markdown em `data/generated/docs/`.
+- `project.scaffold`: cria uma estrutura inicial em `data/generated/projects/`.
+- `artifact.create`: cria pacote de missao em `data/artifacts/`.
+
 ## Estado atual
 
-Esta versao deixa a ideia funcionando como aplicacao web globalmente publicavel e como pacote local-first. Ja existe API local, SQLite, catalogo de ecossistema, missao persistida, adaptador Ollama com fallback offline e executor local que cria artefatos reais em `data/artifacts/`. Autenticacao OAuth, conectores externos, memoria vetorial e execucao avancada de ferramentas ainda sao proximos modulos.
+Esta versao deixa a ideia funcionando como aplicacao web globalmente publicavel e como pacote local-first. Ja existe API local, SQLite, catalogo de ecossistema, missao persistida, adaptador Ollama com fallback offline e executor local que cria artefatos reais em `data/artifacts/` e documentos/projetos em `data/generated/`. Autenticacao OAuth, conectores externos, memoria vetorial e execucao avancada de ferramentas ainda sao proximos modulos.
