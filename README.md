@@ -64,12 +64,14 @@ O build estatico sai em `dist/` e pode ser hospedado em GitHub Pages, Cloudflare
 - `GET /api/tools`
 - `POST /api/tools/run`
 - `GET /api/artifacts`
+- `GET /api/timeline`
 - `GET /api/plugins`
 - `POST /api/plugins/:name/connect`
 - `GET /api/memory`
 - `POST /api/memory`
 - `GET /api/missions`
 - `POST /api/missions`
+- `GET /api/missions/:id/timeline`
 
 ## Ferramentas locais seguras
 
@@ -84,4 +86,4 @@ Use `POST /api/tools/run` com `name` e `input`.
 
 ## Estado atual
 
-Esta versao deixa a ideia funcionando como aplicacao web globalmente publicavel e como pacote local-first. Ja existe API local, SQLite, catalogo de ecossistema, missao persistida, adaptador Ollama com fallback offline e executor local que cria artefatos reais em `data/artifacts/` e documentos/projetos em `data/generated/`. Autenticacao OAuth, conectores externos, memoria vetorial e execucao avancada de ferramentas ainda sao proximos modulos.
+Esta versao deixa a ideia funcionando como aplicacao web globalmente publicavel e como pacote local-first. Ja existe API local, SQLite, catalogo de ecossistema, missao persistida, timeline de execucao, adaptador Ollama com fallback offline e executor local que cria artefatos reais em `data/artifacts/` e documentos/projetos em `data/generated/`. Autenticacao OAuth, conectores externos, memoria vetorial e execucao avancada de ferramentas ainda sao proximos modulos.

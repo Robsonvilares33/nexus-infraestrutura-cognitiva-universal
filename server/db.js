@@ -61,6 +61,19 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE SET NULL
   );
+
+  CREATE TABLE IF NOT EXISTS execution_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mission_id INTEGER,
+    step_index INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed',
+    tool TEXT,
+    summary TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+  );
 `);
 
 db.prepare(`
@@ -126,6 +139,30 @@ export function listArtifacts() {
   return db.prepare('SELECT * FROM artifacts ORDER BY id DESC LIMIT 100').all();
 }
 
+export function saveExecutionStep({ missionId, stepIndex, name, status = 'completed', tool = null, summary = '', payload = {} }) {
+  const info = db.prepare(`
+    INSERT INTO execution_steps (mission_id, step_index, name, status, tool, summary, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(missionId, stepIndex, name, status, tool, summary, JSON.stringify(payload));
+  return db.prepare('SELECT * FROM execution_steps WHERE id = ?').get(info.lastInsertRowid);
+}
+
+export function listExecutionSteps(missionId) {
+  return db.prepare(`
+    SELECT * FROM execution_steps
+    WHERE mission_id = ?
+    ORDER BY step_index, id
+  `).all(missionId).map((step) => ({ ...step, payload: JSON.parse(step.payload_json) }));
+}
+
+export function listRecentExecutionSteps() {
+  return db.prepare(`
+    SELECT * FROM execution_steps
+    ORDER BY id DESC
+    LIMIT 100
+  `).all().map((step) => ({ ...step, payload: JSON.parse(step.payload_json) }));
+}
+
 export function setPlugin(name, category = 'custom', connected = true) {
   db.prepare(`
     INSERT INTO plugins (name, category, connected, updated_at)
@@ -152,6 +189,7 @@ export function stats() {
     missions: one('SELECT COUNT(*) AS count FROM missions'),
     memories: one('SELECT COUNT(*) AS count FROM memories'),
     artifacts: one('SELECT COUNT(*) AS count FROM artifacts'),
+    executionSteps: one('SELECT COUNT(*) AS count FROM execution_steps'),
     pluginsConnected: one('SELECT COUNT(*) AS count FROM plugins WHERE connected = 1'),
     events: one('SELECT COUNT(*) AS count FROM events')
   };

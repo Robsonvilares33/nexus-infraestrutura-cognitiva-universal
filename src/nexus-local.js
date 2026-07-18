@@ -95,6 +95,11 @@ async function submitMissionToLocalApi() {
     });
     const mode = result.mission.plan.mode === 'ollama' ? 'IA local via Ollama' : 'planejador offline';
     feed(`Missão #${result.mission.id} salva com ${mode}. Memória #${result.memory.id} criada.`, 'mem');
+    if (Array.isArray(result.timeline)) {
+      result.timeline.forEach((step) => {
+        feed(`Timeline ${step.stepIndex}: ${step.name} - ${step.summary}`, step.status === 'failed' ? 'tool' : 'mem');
+      });
+    }
     if (result.artifact) {
       feed(`Executor local criou artefato #${result.artifact.id}: ${result.artifact.path}`, 'tool');
     }

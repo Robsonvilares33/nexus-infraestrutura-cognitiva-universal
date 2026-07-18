@@ -9,6 +9,7 @@ import {
   listMemories,
   saveArtifact,
   listArtifacts,
+  listRecentExecutionSteps,
   setPlugin,
   listPlugins,
   saveEvent,
@@ -17,6 +18,7 @@ import {
 import { generateMissionPlan, ollamaStatus } from './ollama.js';
 import { catalog } from './registry.js';
 import { runTool, tools } from './executor.js';
+import { getTimeline, recordStep } from './timeline.js';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -112,6 +114,10 @@ app.get('/api/artifacts', (_req, res) => {
   res.json(listArtifacts());
 });
 
+app.get('/api/timeline', (_req, res) => {
+  res.json(listRecentExecutionSteps());
+});
+
 app.post('/api/memory', (req, res) => {
   const memory = saveMemory({
     kind: req.body.kind || 'note',
@@ -128,12 +134,35 @@ app.get('/api/missions', (_req, res) => {
   res.json(listMissions());
 });
 
+app.get('/api/missions/:id/timeline', (req, res) => {
+  res.json(getTimeline(Number(req.params.id)));
+});
+
 app.post('/api/missions', async (req, res) => {
   const text = String(req.body.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Mission text is required.' });
 
+  const timeline = [];
   const generated = await generateMissionPlan(text);
   const mission = saveMission({ text, model: generated.model, plan: generated.plan });
+  recordStep(mission.id, timeline, {
+    name: 'mission.received',
+    summary: 'Missao recebida e persistida no SQLite local.',
+    payload: { text }
+  });
+  recordStep(mission.id, timeline, {
+    name: 'plan.generated',
+    tool: generated.plan.mode === 'ollama' ? 'ollama.generate' : 'offline.planner',
+    summary: `Plano gerado com ${generated.plan.mode === 'ollama' ? 'IA local' : 'planejador offline'}.`,
+    payload: { model: generated.model, confidence: generated.plan.confidence }
+  });
+  const workspaceSummary = runTool('workspace.summary');
+  recordStep(mission.id, timeline, {
+    name: 'workspace.scanned',
+    tool: 'workspace.summary',
+    summary: `Workspace inspecionado com ${workspaceSummary.files?.length || 0} arquivos indexados.`,
+    payload: { files: workspaceSummary.files?.slice(0, 12) || [] }
+  });
   const artifactResult = runTool('artifact.create', { mission, plan: generated.plan });
   const artifact = artifactResult.ok ? saveArtifact({
     missionId: mission.id,
@@ -142,15 +171,28 @@ app.post('/api/missions', async (req, res) => {
     path: artifactResult.directory,
     summary: artifactResult.summary
   }) : null;
+  recordStep(mission.id, timeline, {
+    name: 'artifact.created',
+    status: artifactResult.ok ? 'completed' : 'failed',
+    tool: 'artifact.create',
+    summary: artifactResult.summary || artifactResult.error || 'Artifact step finished.',
+    payload: { artifact, files: artifactResult.files || [] }
+  });
   const memory = saveMemory({
     kind: 'mission',
     title: text.slice(0, 80),
-    content: JSON.stringify({ plan: generated.plan, artifact: artifactResult }, null, 2),
+    content: JSON.stringify({ plan: generated.plan, artifact: artifactResult, timeline }, null, 2),
     importance: generated.plan.mode === 'ollama' ? 75 : 55,
     source: generated.model
   });
+  recordStep(mission.id, timeline, {
+    name: 'memory.saved',
+    tool: 'memory.write',
+    summary: `Memoria #${memory.id} salva para reutilizacao futura.`,
+    payload: { memoryId: memory.id, source: memory.source }
+  });
   saveEvent('mission.completed', { missionId: mission.id, memoryId: memory.id, artifactId: artifact?.id, model: generated.model });
-  res.status(201).json({ mission, memory, artifact, artifactResult, ollama: generated.status });
+  res.status(201).json({ mission, memory, artifact, artifactResult, timeline, ollama: generated.status });
 });
 
 app.use((_req, res) => {
