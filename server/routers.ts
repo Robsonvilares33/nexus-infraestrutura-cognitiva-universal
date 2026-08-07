@@ -12,6 +12,7 @@ import {
   getMemoryByTier, getAllMemory, addMemory, reprioritizeMemory, deleteMemory,
   getFeedEvents, addFeedEvent,
   getUniverseSettings, saveUniverseSettings,
+  addValidatedTool,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -222,6 +223,109 @@ export const appRouter = router({
     add: protectedProcedure
       .input(z.object({ eventType: z.string(), message: z.string(), confidence: z.number().optional(), agentName: z.string().optional(), missionId: z.number().optional() }))
       .mutation(async ({ ctx, input }) => addFeedEvent(ctx.user.id, input)),
+  }),
+
+  github: router({
+    validate: protectedProcedure
+      .input(z.object({ query: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        const query = input.query.trim();
+        if (!query) return { success: false, error: "Query is required" };
+
+        // Parse repo URL or name
+        let owner: string, repo: string;
+        const urlMatch = query.match(/github\.com\/([^/]+)\/([^/]+)/);
+        if (urlMatch) {
+          owner = urlMatch[1];
+          repo = urlMatch[2].replace('.git', '');
+        } else if (query.includes('/')) {
+          const parts = query.split('/');
+          owner = parts[0];
+          repo = parts[1];
+        } else {
+          // Try as a single name - default to 'tools' search
+          owner = '';
+          repo = query;
+        }
+
+        // If we have owner/repo, validate the repository exists
+        if (owner && repo) {
+          try {
+            const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+              headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'NEXUS-Platform' },
+            });
+            if (!resp.ok) {
+              return { success: false, error: `Repository not found: ${owner}/${repo}` };
+            }
+            const data = await resp.json() as any;
+            // Categorize based on description
+            const desc = (data.description || '').toLowerCase();
+            let category: "model" | "infra" | "device" = "infra";
+            if (/ai|ml|llm|model|gpt|neural|inference/i.test(desc)) category = "model";
+            if (/iot|device|hardware|sensor|robot/i.test(desc)) category = "device";
+
+            const toolName = `${owner}/${repo}`;
+            await addValidatedTool(ctx.user.id, {
+              name: toolName,
+              category,
+              version: data.latest_release?.tag_name || "1.0",
+              description: data.description || "",
+              stars: data.stargazers_count,
+              url: data.html_url,
+              validated: true,
+            });
+
+            await addFeedEvent(ctx.user.id, {
+              eventType: 'agent',
+              message: `Ferramenta validada: ${toolName} (${data.stargazers_count}★)`,
+              agentName: 'Pesquisa',
+              confidence: 0.95,
+            });
+
+            return { success: true, tool: toolName, category, stars: data.stargazers_count, url: data.html_url };
+          } catch {
+            return { success: false, error: "Could not access GitHub API" };
+          }
+        }
+
+        // Otherwise search for tools on GitHub
+        try {
+          const resp = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=1`, {
+            headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'NEXUS-Platform' },
+          });
+          if (!resp.ok) return { success: false, error: "GitHub search failed" };
+          const data = await resp.json() as any;
+          if (!data.items || data.items.length === 0) return { success: false, error: "No repositories found" };
+
+          const topRepo = data.items[0];
+          const desc = (topRepo.description || '').toLowerCase();
+          let category: "model" | "infra" | "device" = "infra";
+          if (/ai|ml|llm|model|gpt|neural|inference/i.test(desc)) category = "model";
+          if (/iot|device|hardware|sensor|robot/i.test(desc)) category = "device";
+
+          const toolName = `${topRepo.full_name}`;
+          await addValidatedTool(ctx.user.id, {
+            name: toolName,
+            category,
+            version: topRepo.latest_release?.tag_name || "1.0",
+            description: topRepo.description || "",
+            stars: topRepo.stargazers_count,
+            url: topRepo.html_url,
+            validated: true,
+          });
+
+          await addFeedEvent(ctx.user.id, {
+            eventType: 'agent',
+            message: `Ferramenta validada: ${toolName} (${topRepo.stargazers_count}★)`,
+            agentName: 'Pesquisa',
+            confidence: 0.95,
+          });
+
+          return { success: true, tool: toolName, category, stars: topRepo.stargazers_count, url: topRepo.html_url };
+        } catch {
+          return { success: false, error: "Could not search GitHub" };
+        }
+      }),
   }),
 });
 

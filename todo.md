@@ -33,4 +33,5 @@
 
 ## Tests
 - [x] Write vitest tests for key procedures (12 tests passing)
-- [ ] Implement GitHub integration for tool validation (pasted_content.txt requirement)
+- [x] Auto-seed ecosystem on dashboard load (auto-populates plugins, models, agents)
+- [x] GitHub tool validation section added to Plugins page

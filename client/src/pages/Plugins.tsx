@@ -6,12 +6,26 @@ const CATEGORY_ICONS = { model: Cpu, infra: Server, device: Radio };
 const CATEGORY_COLORS = { model: "#7cf3ff", infra: "#c9b8ff", device: "#ffd479" };
 const CATEGORY_LABELS = { model: "Modelos de IA", infra: "Infraestrutura", device: "Dispositivos" };
 
+import { toast } from "sonner";
+
 export default function Plugins() {
   const { data: plugins, refetch } = trpc.plugins.list.useQuery();
   const connectMutation = trpc.plugins.connect.useMutation({ onSuccess: () => refetch() });
   const disconnectMutation = trpc.plugins.disconnect.useMutation({ onSuccess: () => refetch() });
   const addMutation = trpc.plugins.add.useMutation({ onSuccess: () => refetch() });
+  const validateMutation = trpc.github.validate.useMutation({
+    onSuccess: (res) => {
+      if (res.success) {
+        toast.success(`Ferramenta validada: ${res.tool}`);
+        refetch();
+        setGithubQuery("");
+      } else {
+        toast.error(res.error || "Falha na validação");
+      }
+    }
+  });
   const [adding, setAdding] = useState(false);
+  const [githubQuery, setGithubQuery] = useState("");
   const [newPlugin, setNewPlugin] = useState({ name: "", category: "model" as "model"|"infra"|"device", version: "" });
 
   const grouped = plugins?.reduce<Record<string, typeof plugins>>((acc, p) => {
@@ -52,6 +66,36 @@ export default function Plugins() {
           </div>
         </div>
       )}
+
+      {/* GitHub Tool Validation */}
+      <div className="nexus-card p-5 border-dashed border-[#7cf3ff]/20 bg-[#7cf3ff]/5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 rounded-full bg-[#7cf3ff]/10 flex items-center justify-center">
+            <Plug className="h-5 w-5 text-[#7cf3ff]" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-[#e2e8f4]">Validação de Ferramentas Open Source</h3>
+            <p className="text-[10px] font-mono text-[#7684a0]">Busca, validação e catalogação automática via GitHub</p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <input 
+            type="text" 
+            value={githubQuery}
+            onChange={(e) => setGithubQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && validateMutation.mutate({ query: githubQuery })}
+            placeholder="URL do repositório ou nome da ferramenta..." 
+            className="flex-1 nexus-card px-4 py-2 text-xs text-[#e2e8f4] font-mono bg-[#020308] focus:outline-none focus:border-[#7cf3ff]/30"
+          />
+          <button 
+            onClick={() => validateMutation.mutate({ query: githubQuery })}
+            disabled={validateMutation.isPending || !githubQuery.trim()}
+            className="nexus-card px-6 py-2 text-[#7cf3ff] hover:bg-[#7cf3ff]/10 text-xs font-mono disabled:opacity-50"
+          >
+            {validateMutation.isPending ? "VALIDANDO..." : "VALIDAR"}
+          </button>
+        </div>
+      </div>
 
       {(["model","infra","device"] as const).map(cat => {
         const items = grouped[cat] || [];

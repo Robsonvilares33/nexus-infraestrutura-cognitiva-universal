@@ -58,7 +58,7 @@ export async function getUserByOpenId(openId: string) {
 export async function getDashboardStats(userId: number) {
   const db = await getDb();
   if (!db) return { missions: 0, projects: 0, plugins: 0, connectedPlugins: 0, models: 0, connectedModels: 0, agents: 0, onlineAgents: 0, executingMissions: 0, memoryItems: 0 };
-  const [mCount, pCount, plCount, cpCount, moCount, cmCount, agCount, oaCount, emCount, memCount] = await Promise.all([
+  let [mCount, pCount, plCount, cpCount, moCount, cmCount, agCount, oaCount, emCount, memCount] = await Promise.all([
     db.select({ count: sql<number>`count(*)` }).from(missions).where(eq(missions.userId, userId)),
     db.select({ count: sql<number>`count(*)` }).from(projects).where(eq(projects.userId, userId)),
     db.select({ count: sql<number>`count(*)` }).from(plugins).where(eq(plugins.userId, userId)),
@@ -70,6 +70,27 @@ export async function getDashboardStats(userId: number) {
     db.select({ count: sql<number>`count(*)` }).from(missions).where(and(eq(missions.userId, userId), eq(missions.status, 'executing'))),
     db.select({ count: sql<number>`count(*)` }).from(memory).where(eq(memory.userId, userId)),
   ]);
+
+  // Auto-seed if no agents
+  if ((agCount[0]?.count ?? 0) === 0) {
+    await seedPlugins(userId);
+    await seedModels(userId);
+    await seedAgents(userId);
+    // Re-fetch stats after seed
+    [mCount, pCount, plCount, cpCount, moCount, cmCount, agCount, oaCount, emCount, memCount] = await Promise.all([
+      db.select({ count: sql<number>`count(*)` }).from(missions).where(eq(missions.userId, userId)),
+      db.select({ count: sql<number>`count(*)` }).from(projects).where(eq(projects.userId, userId)),
+      db.select({ count: sql<number>`count(*)` }).from(plugins).where(eq(plugins.userId, userId)),
+      db.select({ count: sql<number>`count(*)` }).from(plugins).where(and(eq(plugins.userId, userId), eq(plugins.connected, true))),
+      db.select({ count: sql<number>`count(*)` }).from(models).where(eq(models.userId, userId)),
+      db.select({ count: sql<number>`count(*)` }).from(models).where(and(eq(models.userId, userId), eq(models.connected, true))),
+      db.select({ count: sql<number>`count(*)` }).from(agents).where(eq(agents.userId, userId)),
+      db.select({ count: sql<number>`count(*)` }).from(agents).where(and(eq(agents.userId, userId), eq(agents.status, 'online'))),
+      db.select({ count: sql<number>`count(*)` }).from(missions).where(and(eq(missions.userId, userId), eq(missions.status, 'executing'))),
+      db.select({ count: sql<number>`count(*)` }).from(memory).where(eq(memory.userId, userId)),
+    ]);
+  }
+
   return {
     missions: mCount[0]?.count ?? 0,
     projects: pCount[0]?.count ?? 0,
@@ -328,6 +349,23 @@ export async function deleteMemory(userId: number, memoryId: number) {
   const db = await getDb();
   if (!db) return null;
   return db.delete(memory).where(and(eq(memory.userId, userId), eq(memory.id, memoryId)));
+}
+
+// GitHub Tool Validation
+export async function addValidatedTool(userId: number, data: { name: string; category: "model" | "infra" | "device"; version?: string; description?: string; stars?: number; url?: string; validated: boolean }) {
+  const db = await getDb();
+  if (!db) return null;
+  // Check if already exists
+  const existing = await db.select().from(plugins).where(and(eq(plugins.userId, userId), eq(plugins.name, data.name))).limit(1);
+  if (existing.length > 0) return existing[0];
+  const result = await db.insert(plugins).values({
+    userId,
+    name: data.name,
+    category: data.category,
+    version: data.version || "1.0",
+    connected: false,
+  });
+  return result;
 }
 
 // Cognitive Feed
