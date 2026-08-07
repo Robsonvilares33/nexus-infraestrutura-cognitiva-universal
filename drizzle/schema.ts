@@ -1,17 +1,7 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, float, boolean, datetime } from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -25,4 +15,99 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// Plugins
+export const plugins = mysqlTable("plugins", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  category: mysqlEnum("category", ["model", "infra", "device"]).notNull(),
+  connected: boolean("connected").default(false).notNull(),
+  version: varchar("version", { length: 32 }),
+  permissions: text("permissions"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// AI Models
+export const models = mysqlTable("models", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 64 }).notNull(),
+  connected: boolean("connected").default(false).notNull(),
+  competencyScore: int("competencyScore").default(0),
+  tasksAssigned: int("tasksAssigned").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Agents
+export const agents = mysqlTable("agents", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 64 }).notNull(),
+  specialization: varchar("specialization", { length: 32 }).default("").notNull(),
+  status: varchar("status", { length: 32 }).default("offline").notNull(),
+  currentModel: varchar("currentModel", { length: 64 }),
+  hue: varchar("hue", { length: 16 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Projects
+export const projects = mysqlTable("projects", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 256 }).notNull(),
+  description: text("description"),
+  status: mysqlEnum("status", ["active", "paused", "completed"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Missions
+export const missions = mysqlTable("missions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  projectId: int("projectId"),
+  input: text("input").notNull(),
+  status: mysqlEnum("status", ["pending", "executing", "completed", "failed"]).default("pending").notNull(),
+  result: text("result"),
+  resultType: varchar("resultType", { length: 32 }),
+  confidence: varchar("confidence", { length: 10 }),
+  startedAt: datetime("startedAt"),
+  completedAt: datetime("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Memory
+export const memory = mysqlTable("memory", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  content: text("content").notNull(),
+  tier: mysqlEnum("tier", ["ativa", "relevante", "historica", "arquivada"]).default("ativa").notNull(),
+  confidence: varchar("confidence", { length: 10 }),
+  origin: varchar("origin", { length: 64 }),
+  tags: varchar("tags", { length: 512 }),
+  accessedAt: datetime("accessedAt"),
+  promotedAt: datetime("promotedAt"),
+  archivedAt: datetime("archivedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Cognitive Feed
+export const cognitiveFeed = mysqlTable("cognitiveFeed", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  eventType: varchar("eventType", { length: 64 }).notNull(),
+  message: text("message").notNull(),
+  confidence: varchar("confidence", { length: 10 }),
+  agentName: varchar("agentName", { length: 64 }),
+  missionId: int("missionId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Universe Settings
+export const universeSettings = mysqlTable("universeSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique(),
+  displayName: varchar("displayName", { length: 256 }),
+  foundingDate: datetime("foundingDate"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
