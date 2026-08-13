@@ -13,6 +13,7 @@ import {
   getFeedEvents, addFeedEvent,
   getUniverseSettings, saveUniverseSettings,
   addValidatedTool,
+  shareProject, getSharedProjects, getProjectShares, removeProjectShare, getUsersByIds,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -87,6 +88,60 @@ export const appRouter = router({
       .input(z.object({ projectId: z.number(), name: z.string().optional(), description: z.string().optional(), status: z.string().optional() }))
       .mutation(async ({ ctx, input }) => { const { projectId, ...data } = input; return updateProject(ctx.user.id, projectId, data); }),
     delete: protectedProcedure.input(z.object({ projectId: z.number() })).mutation(async ({ ctx, input }) => deleteProject(ctx.user.id, input.projectId)),
+    // Collaboration
+    share: protectedProcedure
+      .input(z.object({ projectId: z.number(), sharedUserId: z.number(), permission: z.enum(['view', 'edit', 'admin']).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await shareProject(ctx.user.id, input.projectId, input.sharedUserId, input.permission || 'view');
+        return { success: true };
+      }),
+    sharedWithMe: protectedProcedure.query(async ({ ctx }) => {
+      const shares = await getSharedProjects(ctx.user.id);
+      if (shares.length === 0) return [];
+      const projectIds = shares.map(s => s.projectId);
+      // Get all projects to find matching ones
+      const allProjects = await getProjects(ctx.user.id);
+      // Also need to get projects from other users - use raw query
+      const db = await import("./db").then(m => m.getDb());
+      if (!db) return [];
+      const { projects: projectsTable } = await import("../drizzle/schema");
+      const { inArray } = await import("drizzle-orm");
+      const sharedProjects = await db.select().from(projectsTable).where(inArray(projectsTable.id, projectIds));
+      return sharedProjects.map(p => ({ ...p, shares: shares.filter(s => s.projectId === p.id) }));
+    }),
+    getShares: protectedProcedure.input(z.object({ projectId: z.number() })).query(async ({ ctx, input }) => {
+      const shares = await getProjectShares(input.projectId);
+      if (shares.length === 0) return [];
+      const userIds = shares.map(s => s.sharedUserId);
+      const usersList = await getUsersByIds(userIds);
+      return shares.map(s => ({ ...s, user: usersList.find(u => u.id === s.sharedUserId) }));
+    }),
+    removeShare: protectedProcedure.input(z.object({ shareId: z.number() })).mutation(async ({ ctx, input }) => {
+      await removeProjectShare(input.shareId);
+      return { success: true };
+    }),
+    // Find users by email/name for collaboration
+    findUsers: protectedProcedure
+      .input(z.object({ query: z.string() }))
+      .query(async ({ ctx, input }) => {
+        try {
+          const { getDb } = await import("./db");
+          const { users: usersTable } = await import("../drizzle/schema");
+          const { like, or } = await import("drizzle-orm");
+          const database = await getDb();
+          if (!database) return [];
+          const results = await database.select()
+            .from(usersTable)
+            .where(or(
+              like(usersTable.email, `%${input.query}%`),
+              like(usersTable.name, `%${input.query}%`),
+            ))
+            .limit(10);
+          return results;
+        } catch {
+          return [];
+        }
+      }),
   }),
 
   missions: router({
@@ -216,6 +271,58 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => addMemory(ctx.user.id, input)),
     reprioritize: protectedProcedure.input(z.object({ memoryId: z.number(), tier: z.enum(['ativa', 'relevante', 'historica', 'arquivada']) })).mutation(async ({ ctx, input }) => reprioritizeMemory(ctx.user.id, input.memoryId, input.tier)),
     delete: protectedProcedure.input(z.object({ memoryId: z.number() })).mutation(async ({ ctx, input }) => deleteMemory(ctx.user.id, input.memoryId)),
+    search: protectedProcedure
+      .input(z.object({ query: z.string(), limit: z.number().optional() }))
+      .query(async ({ ctx, input }) => {
+        const memories = await getAllMemory(ctx.user.id);
+        if (!memories || memories.length === 0) return [];
+
+        // Semantic search using LLM to find relevant memories
+        const memoryContents = memories.map(m => `[${m.id}] ${m.content.slice(0, 300)}`).join("\n\n");
+        const maxMemories = 50; // Limit for LLM context
+        const searchMemories = memories.slice(0, maxMemories);
+        const searchContents = searchMemories.map(m => `[${m.id}] ${m.content.slice(0, 300)}`).join("\n\n");
+
+        try {
+          const result = await invokeLLM({
+            model: 'gpt-5-mini',
+            messages: [
+              { role: 'system', content: 'You are a memory search engine. Given a query and a list of memories, return the IDs of the most semantically relevant memories, ordered by relevance (most relevant first). Return JSON.' },
+              { role: 'user', content: `Query: "${input.query}"
+
+Memories:
+${searchContents}
+
+Return the IDs (integers) of memories semantically relevant to the query. Most relevant first. Limit to ${input.limit || 5} results.` },
+            ],
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'relevant_memories',
+                strict: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    relevantIds: { type: 'array', items: { type: 'integer' } },
+                  },
+                  required: ['relevantIds'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+          const parsed = JSON.parse(result.choices[0].message.content as string);
+          const relevantIds: number[] = parsed.relevantIds || [];
+          return relevantIds
+            .map(id => searchMemories.find(m => m.id === id))
+            .filter(Boolean)
+            .slice(0, input.limit || 5) as typeof memories;
+        } catch {
+          // Fallback to keyword search
+          const lowerQuery = input.query.toLowerCase();
+          return memories.filter(m => m.content.toLowerCase().includes(lowerQuery)).slice(0, input.limit || 5);
+        }
+      }),
   }),
 
   feed: router({

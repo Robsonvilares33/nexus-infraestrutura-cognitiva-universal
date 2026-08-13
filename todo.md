@@ -35,3 +35,16 @@
 - [x] Write vitest tests for key procedures (12 tests passing)
 - [x] Auto-seed ecosystem on dashboard load (auto-populates plugins, models, agents)
 - [x] GitHub tool validation section added to Plugins page
+
+## Advanced Features (Phase 2)
+- [x] Real-time streaming for cognitive feed (WebSocket/SSE)
+  - socket.io server integrated into express
+  - MinhaIA page connects to WebSocket for live events
+  - feed events broadcast in real-time during mission execution
+- [x] Semantic memory search using LLM-powered semantic matching
+  - memory.search endpoint uses LLM to find relevant memories
+  - Busca Semântica button added to Memoria page
+- [x] Collaboration panel for shared projects
+  - projectShares table created
+  - share/getShares/sharedWithMe/removeShare endpoints
+  - Share button added to Projetos page

@@ -2,7 +2,8 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
-  type InsertUser
+  projectShares,
+  type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -381,5 +382,62 @@ export async function addFeedEvent(userId: number, data: { eventType: string; me
   if (data.confidence !== undefined) vals.confidence = data.confidence.toString();
   if (data.agentName) vals.agentName = data.agentName;
   if (data.missionId) vals.missionId = data.missionId;
-  return db.insert(cognitiveFeed).values(vals);
+  const result = await db.insert(cognitiveFeed).values(vals);
+
+  // Broadcast to WebSocket for real-time updates
+  try {
+    const { getIO } = await import("./socket");
+    const io = getIO();
+    if (io) {
+      io.to(`user:${userId}`).emit("cognitive:feed", {
+        eventType: data.eventType,
+        message: data.message,
+        timestamp: Date.now(),
+        confidence: data.confidence,
+        agentName: data.agentName,
+        missionId: data.missionId,
+      });
+    }
+  } catch {
+    // Socket not available, that's fine
+  }
+
+  return result;
+}
+
+// --- Collaboration ---
+export async function shareProject(userId: number, projectId: number, sharedUserId: number, permission: "view" | "edit" | "admin" = "view") {
+  const db = await getDb();
+  if (!db) return null;
+  return db.insert(projectShares).values({ projectId, sharedUserId, sharedByUserId: userId, permission });
+}
+
+export async function getSharedProjects(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select()
+    .from(projectShares)
+    .where(eq(projectShares.sharedUserId, userId));
+}
+
+export async function getProjectShares(projectId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select()
+    .from(projectShares)
+    .where(eq(projectShares.projectId, projectId));
+}
+
+export async function removeProjectShare(shareId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.delete(projectShares).where(eq(projectShares.id, shareId));
+}
+
+export async function getUsersByIds(ids: number[]) {
+  const db = await getDb();
+  if (!db || ids.length === 0) return [];
+  return db.select()
+    .from(users)
+    .where(sql`id IN (${sql.join(ids, sql`, `)})`);
 }

@@ -111,3 +111,16 @@ export const universeSettings = mysqlTable("universeSettings", {
   foundingDate: datetime("foundingDate"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Project Collaboration - sharing between users
+export const projectShares = mysqlTable("projectShares", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull(),
+  sharedUserId: int("sharedUserId").notNull(),
+  sharedByUserId: int("sharedByUserId").notNull(),
+  permission: mysqlEnum("permission", ["view", "edit", "admin"]).default("view").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ProjectShare = typeof projectShares.$inferSelect;
+export type InsertProjectShare = typeof projectShares.$inferInsert;

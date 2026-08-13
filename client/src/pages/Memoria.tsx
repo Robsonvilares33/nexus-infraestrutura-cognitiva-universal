@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
-import { Database, Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
+import { Database, Plus, Trash2, ArrowUp, ArrowDown, Search } from "lucide-react";
 
 const TIER_ORDER: Record<string, number> = { ativa: 0, relevante: 1, historica: 2, arquivada: 3 };
 const TIER_COLORS: Record<string, string> = { ativa: "#3fe7b0", relevante: "#7cf3ff", historica: "#c9b8ff", arquivada: "#7684a0" };
@@ -11,6 +11,12 @@ export default function Memoria() {
   const reprioritizeMutation = trpc.memory.reprioritize.useMutation({ onSuccess: () => refetch() });
   const deleteMutation = trpc.memory.delete.useMutation({ onSuccess: () => refetch() });
   const [adding, setAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState(false);
+  const { data: searchResults, refetch: refetchSearch, isLoading: searchLoading } = trpc.memory.search.useQuery(
+    { query: searchQuery, limit: 10 },
+    { enabled: searchMode && searchQuery.length > 0 }
+  );
   const [newMemory, setNewMemory] = useState({ content: "", tier: "ativa" as const });
 
   const grouped = memory?.reduce<Record<string, typeof memory>>((acc, m) => {
@@ -44,10 +50,49 @@ export default function Memoria() {
           </h2>
           <p className="text-[10px] font-mono text-[#7684a0] tracking-wider uppercase">4 camadas: Ativa, Relevante, Histórica, Arquivada</p>
         </div>
-        <button onClick={() => setAdding(!adding)} className="nexus-card px-3 py-2 text-[#3fe7b0] hover:bg-[#3fe7b0]/10 text-xs font-mono flex items-center gap-2">
-          <Plus className="h-3 w-3" /> ADICIONAR
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setSearchMode(!searchMode); setSearchQuery(""); }}
+            className={`nexus-card px-3 py-2 text-xs font-mono flex items-center gap-2 transition-colors ${
+              searchMode ? "text-[#ffd479] bg-[#ffd479]/10" : "text-[#3fe7b0] hover:bg-[#3fe7b0]/10"
+            }`}
+          >
+            <Search className="h-3 w-3" /> BUSCA SEMÂNTICA
+          </button>
+          <button onClick={() => setAdding(!adding)} className="nexus-card px-3 py-2 text-[#3fe7b0] hover:bg-[#3fe7b0]/10 text-xs font-mono flex items-center gap-2">
+            <Plus className="h-3 w-3" /> ADICIONAR
+          </button>
+        </div>
       </div>
+
+      {searchMode && (
+        <div className="nexus-card p-4">
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Busca semântica na memória..."
+              className="flex-1 nexus-card px-4 py-2 text-xs text-[#e2e8f4] font-mono bg-transparent focus:outline-none focus:border-[#ffd479]/30"
+            />
+          </div>
+          {searchLoading && <p className="text-[9px] font-mono text-[#7684a0] mt-2 animate-pulse">Buscando memórias relevantes...</p>}
+          {searchResults && searchResults.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <p className="text-[9px] font-mono text-[#ffd479] tracking-wider">RESULTADOS SEMÂNTICOS ({searchResults.length})</p>
+              {searchResults.map(item => (
+                <div key={item.id} className="nexus-card p-3 border-l-2 border-[#ffd479]/40">
+                  <p className="text-xs font-mono text-[#aab4d6] line-clamp-3">{item.content}</p>
+                  <span className="text-[8px] font-mono text-[#3fe7b0]">Tier: {item.tier}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {searchResults && searchResults.length === 0 && searchQuery.length > 0 && (
+            <p className="text-[9px] font-mono text-[#7684a0] mt-2">Nenhuma memória relevante encontrada para "{searchQuery}"</p>
+          )}
+        </div>
+      )}
 
       {adding && (
         <div className="nexus-card p-4">
