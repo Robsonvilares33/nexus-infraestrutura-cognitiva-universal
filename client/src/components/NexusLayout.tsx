@@ -5,7 +5,7 @@ import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
   BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy, Zap,
-  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2
+  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2, NotebookPen
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { path: "/minha-ia", label: "Minha IA", icon: Brain },
   { path: "/plugins", label: "Plugins", icon: Plug },
   { path: "/memoria", label: "Memória", icon: Database },
+  { path: "/super-memoria", label: "Super Memória", icon: NotebookPen },
   { path: "/agentes", label: "Agentes", icon: Bot },
   { path: "/modelos", label: "Modelos", icon: Cpu },
   { path: "/projetos", label: "Projetos", icon: Folder },

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, sql, inArray, or, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
@@ -1490,4 +1490,64 @@ export async function seedMissionTemplates() {
     await createMissionTemplate({ ...t });
   }
   return MISSION_TEMPLATES_SEED.length;
+}
+
+// --- Phase 14: Super Memória (SuperNotes) + User LLM settings ---
+import { superNotes, userLlmSettings, type InsertSuperNote } from "../drizzle/schema";
+
+export async function addSuperNote(note: InsertSuperNote): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const result = await db.insert(superNotes).values(note as any);
+  return Number((result as any)[0]?.insertId ?? 0);
+}
+
+export async function listSuperNotes(userId: number, opts: { folder?: string } = {}) {
+  const db = await getDb();
+  if (!db) return [];
+  const cond = opts.folder ? and(eq(superNotes.userId, userId), eq(superNotes.folder, opts.folder)) : eq(superNotes.userId, userId);
+  return db.select().from(superNotes).where(cond).orderBy(desc(superNotes.updatedAt));
+}
+
+export async function getSuperNote(userId: number, id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(superNotes).where(and(eq(superNotes.id, id), eq(superNotes.userId, userId))).limit(1);
+  return rows[0];
+}
+
+export async function updateSuperNote(userId: number, id: number, patch: Partial<InsertSuperNote>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.update(superNotes).set(patch).where(and(eq(superNotes.id, id), eq(superNotes.userId, userId)));
+}
+
+export async function deleteSuperNote(userId: number, id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.delete(superNotes).where(and(eq(superNotes.id, id), eq(superNotes.userId, userId)));
+}
+
+export async function searchSuperNotes(userId: number, query: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const q = `%${query}%`;
+  return db.select()
+    .from(superNotes)
+    .where(and(eq(superNotes.userId, userId), or(like(superNotes.title, q), like(superNotes.content, q), like(superNotes.tags, q))))
+    .orderBy(desc(superNotes.updatedAt))
+    .limit(50);
+}
+
+export async function getLlmSettings(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(userLlmSettings).where(eq(userLlmSettings.userId, userId)).limit(1);
+  return rows[0];
+}
+
+export async function upsertLlmSettings(userId: number, patch: Partial<typeof userLlmSettings.$inferInsert>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.insert(userLlmSettings).values({ userId, ...patch } as any).onDuplicateKeyUpdate({ set: patch as any });
 }

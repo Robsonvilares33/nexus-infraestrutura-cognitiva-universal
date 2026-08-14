@@ -13,6 +13,7 @@ import Agentes from "./pages/Agentes";
 import Modelos from "./pages/Modelos";
 import Projetos from "./pages/Projetos";
 import Config from "./pages/Config";
+import SuperMemoria from "./pages/SuperMemoria";
 import Status from "./pages/Status";
 import Docs from "./pages/Docs";
 import Analytics from "./pages/Analytics";
@@ -38,6 +39,7 @@ function Router() {
         <Route path="/modelos" component={Modelos} />
         <Route path="/projetos" component={Projetos} />
         <Route path="/config" component={Config} />
+        <Route path="/super-memoria" component={SuperMemoria} />
         <Route path="/status" component={Status} />
         <Route path="/docs" component={Docs} />
         <Route path="/analytics" component={Analytics} />
