@@ -1,0 +1,83 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1785763221331,
+      "tag": "0000_cynical_jackal",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1786021767061,
+      "tag": "0001_lonely_george_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786021825455,
+      "tag": "0002_curvy_post",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1786651118032,
+      "tag": "0003_wooden_puppet_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1786673820484,
+      "tag": "0004_short_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786674747396,
+      "tag": "0005_narrow_korath",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786675313378,
+      "tag": "0006_romantic_surge",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786676503839,
+      "tag": "0007_tough_sunset_bain",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1786677120686,
+      "tag": "0008_living_ironclad",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1786705988627,
+      "tag": "0009_rare_siren",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786707273980,
+      "tag": "0010_fat_quasimodo",
+      "breakpoints": true
+    }
+  ]
+}
