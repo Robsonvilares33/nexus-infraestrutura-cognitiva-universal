@@ -185,11 +185,11 @@
 - [x] Relatório de avaliação + guia de uso + possibilidades (relatorio-auditoria-nexus.md entregue)
 
 ## Fase 13: Fusão NEXUS + Manus (arquitetura fundida)
-- [ ] Analisar arquitetura interna do Manus (agente loop, ferramentas, streaming, contexto) e mapear conceitos fundíveis
-- [ ] Backend: executor agente em loop iterativo com subtarefas dinâmicas acionáveis
-- [ ] Backend: planejamento adaptativo (replaneja quando subtarefa falha ou missão muda)
-- [ ] Backend: memória de contexto persistente entre etapas da missão (context window compacta)
-- [ ] Backend: streaming real de eventos (SSE/WebSocket) substituindo polling síncrono
-- [ ] Frontend: console de agente com stream ao vivo, ferramentas acionáveis e progresso iterativo
-- [ ] Teste de estresse da arquitetura fundida
-- [ ] Sincronizar GitHub
+- [x] Analisar arquitetura interna do Manus (agente loop, ferramentas, streaming, contexto) e mapear conceitos fundíveis
+- [x] Backend: executor agente em loop iterativo com subtarefas dinâmicas acionáveis
+- [x] Backend: planejamento adaptativo a falhas (erros persistidos como observações no contexto, o modelo se adapta e tenta outro caminho; fallback por síntese ao esgotar iterações)
+- [x] Backend: memória de contexto persistente entre etapas da missão (context window compacta) — seeds memória ativa + compressão >16 msgs
+- [x] Backend: streaming real de eventos (SSE + polling de fallback) substituindo polling síncrono
+- [x] Frontend: console de agente com stream ao vivo e progresso iterativo (Modo Agente em Minha IA) — observabilidade em tempo real dos tool calls/resultados
+- [x] Teste de estresse da arquitetura fundida — 60/60 vitest incl. teste live; fast-fail verificado
+- [x] Sincronizar GitHub
