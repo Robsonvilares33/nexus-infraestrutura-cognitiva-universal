@@ -43,6 +43,19 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
+  // Phase 10: live online/offline indicator
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== "undefined" ? navigator.onLine : true));
+  useEffect(() => {
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
   const { data: unreadCount } = trpc.notifications.unreadCount.useQuery(undefined, {
     enabled: isAuthenticated,
     refetchInterval: 15000,
@@ -227,7 +240,11 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
                   {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
                 </button>
               )}
-              <span className="nexus-chip nexus-chip-online">CONECTADO</span>
+              {isOnline ? (
+                <span className="nexus-chip nexus-chip-online">CONECTADO</span>
+              ) : (
+                <span className="nexus-chip nexus-chip-offline" title="Sem conexão — missões recentes disponíveis em cache">OFFLINE</span>
+              )}
               <span className="hidden sm:block text-[9px] font-mono text-[#7684a0]">
                 ID: {user?.id}
               </span>
