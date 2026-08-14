@@ -609,7 +609,7 @@ describe("plugin verification", () => {
 
   it("fails on hardcoded secrets", () => {
     const result = verifyPluginSource(
-      "const key = \"ghp_PLACEHOLDER_TOKEN_FOR_TESTING_ONLY"; export default key;",
+      "const key = \"ghp_PLACEHOLDER0123456789ABCDEFGHIJKLMNOPQ"; export default key;",
       { name: "vitest-secret", category: "utility" },
     );
     expect(result.status).toBe("failed");
