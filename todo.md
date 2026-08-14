@@ -173,6 +173,7 @@
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
 - [x] Sincronização final com o GitHub (commit a5279bd)
+- [x] Correção de UI: role admin recém-promovido não via Admin na sessão (cache de auth.me) — useAuth agora refetch em focus/reconnect (staleTime 30s) + refreshMe(); backend sempre lê role do DB (verificado)
 
 ## Auditoria solicitada (14/08)
 - [x] Verificar sincronização completa com o GitHub (arquivos, commits) — 190/191 arquivos locais no remote; único ausente é .session-notes.md (intencional, contém credenciais)

@@ -18,8 +18,19 @@ export function useAuth(options?: UseAuthOptions) {
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
     retry: false,
-    refetchOnWindowFocus: false,
+    // Role changes (e.g. admin promotion) are made in the DB, but auth.me is
+    // client-cached by React Query. Re-verify on refocus/reconnect so newly
+    // promoted users see the fresh role without needing to re-login.
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 30_000,
   });
+
+  /** Force an immediate fresh read of auth.me (e.g. after a role change). */
+  const refreshMe = useCallback(
+    () => utils.auth.me.invalidate(),
+    [utils]
+  );
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
@@ -93,6 +104,7 @@ export function useAuth(options?: UseAuthOptions) {
   return {
     ...state,
     refresh: () => meQuery.refetch(),
+    refreshMe,
     logout,
   };
 }
