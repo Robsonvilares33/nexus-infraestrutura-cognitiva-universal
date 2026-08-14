@@ -398,7 +398,8 @@ describe("webhooks", () => {
     const caller = appRouter.createCaller(ctx);
 
     const createRes = await caller.missions.create({ input: "Missão de teste para webhooks" });
-    const missionId = (createRes as any)?.id ?? 1;
+    const missionId = (createRes as any)?.insertId ?? (createRes as any)?.[0]?.insertId;
+    if (!missionId) throw new Error("createMission did not return insertId");
     await caller.missions.update({ missionId, status: "completed", result: "ok" });
 
     await caller.webhooks.add({ missionId, url: "https://httpbin.org/status/200" });
@@ -824,6 +825,19 @@ async function wipeVitestArtifacts() {
   const db = await getDb();
   if (!db) return;
   await db.execute("DELETE FROM cognitiveFeed WHERE userId = 1 AND message LIKE '%vitest%'");
+  // Marketplace test plugins and related rows persist in the live UI otherwise.
+  await db.execute("DELETE r FROM marketplaceReviews r JOIN marketplacePlugins p ON r.pluginId = p.id WHERE p.name LIKE 'vitest-mark%'");
+  await db.execute("DELETE FROM marketplaceInstalls WHERE pluginId IN (SELECT id FROM marketplacePlugins WHERE name LIKE 'vitest-mark%')");
+  await db.execute("DELETE FROM pluginVerifications WHERE pluginId IN (SELECT id FROM marketplacePlugins WHERE name LIKE 'vitest-mark%')");
+  await db.execute("DELETE FROM marketplacePlugins WHERE name LIKE 'vitest-mark%'");
+  // The analytics test (missions.create with "Análise de mercado...") leaves real
+  // pending missions in the live DB — clean them and their feed/webhook artifacts.
+  await db.execute("DELETE FROM cognitiveFeed WHERE userId = 1 AND message LIKE '%Análise de mercado%'");
+  await db.execute("DELETE FROM missionWebhooks WHERE missionId IN (SELECT id FROM missions WHERE userId = 1 AND input LIKE 'Análise de mercado%')");
+  await db.execute("DELETE FROM missions WHERE userId = 1 AND input LIKE 'Análise de mercado%'");
+  // The webhook test's completed mission would otherwise remain in the live DB.
+  await db.execute("DELETE FROM missionWebhooks WHERE missionId IN (SELECT id FROM missions WHERE userId = 1 AND input LIKE 'Missão de teste para webhooks%')");
+  await db.execute("DELETE FROM missions WHERE userId = 1 AND input LIKE 'Missão de teste para webhooks%'");
 }
 
 afterEach(() => wipeVitestArtifacts());
