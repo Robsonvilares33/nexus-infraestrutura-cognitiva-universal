@@ -1,0 +1,91 @@
+export const catalog = {
+  completeAgents: [
+    { name: 'OpenClaw', status: 'candidate', notes: 'Gateway local para memória, ferramentas e canais.' },
+    { name: 'Hermes Agent', status: 'candidate', notes: 'Foco em memória longa, autoaprendizado e skills.' },
+    { name: 'Agent Zero', status: 'candidate', notes: 'Assistente agente com ferramentas locais.' },
+    { name: 'Manus AI', status: 'external', notes: 'Serviço/plataforma externa; depende de acesso próprio.' },
+    { name: 'OpenCode', status: 'candidate', notes: 'Fluxo voltado a desenvolvimento local.' },
+    { name: 'Claude Code', status: 'external-api', notes: 'Excelente para código, mas depende de conta/API.' },
+    { name: 'Codex CLI', status: 'external-api', notes: 'Excelente para repositórios, mas depende de conta/API.' },
+    { name: 'Devin', status: 'commercial', notes: 'Comercial; não é local-first.' },
+    { name: 'Cognition AI', status: 'commercial', notes: 'Ecossistema comercial.' }
+  ],
+  agentFrameworks: [
+    'CrewAI',
+    'AutoGen',
+    'LangGraph',
+    'LangChain',
+    'Semantic Kernel',
+    'Haystack',
+    'LlamaIndex',
+    'PydanticAI',
+    'DSPy'
+  ],
+  orchestrators: [
+    'CrewAI',
+    'AutoGen',
+    'LangGraph',
+    'Camel-AI',
+    'MetaGPT',
+    'AutoGPT',
+    'SuperAGI',
+    'AgentVerse',
+    'Swarm',
+    'Microsoft Magentic-One'
+  ],
+  memorySystems: [
+    { name: 'SQLite', localFit: 'excellent', notes: 'Base padrão atual do NEXUS local.' },
+    { name: 'Obsidian', localFit: 'excellent', notes: 'Boa camada humana de conhecimento.' },
+    { name: 'LanceDB', localFit: 'good', notes: 'Boa opção local para vetores.' },
+    { name: 'ChromaDB', localFit: 'good', notes: 'Popular para protótipos de memória vetorial.' },
+    { name: 'Qdrant', localFit: 'good', notes: 'Forte para busca vetorial local ou servidor.' },
+    { name: 'Letta / MemGPT', localFit: 'medium', notes: 'Boa arquitetura de memória agentiva.' },
+    { name: 'PostgreSQL + pgvector', localFit: 'medium', notes: 'Excelente quando o projeto crescer.' },
+    { name: 'Weaviate', localFit: 'heavy', notes: 'Mais pesado para este hardware.' },
+    { name: 'Milvus', localFit: 'heavy', notes: 'Poderoso, mas pesado para laptop simples.' },
+    { name: 'Hermes Memory', localFit: 'candidate', notes: 'Mapear integração depois.' }
+  ],
+  tools: [
+    'Ollama',
+    'Open WebUI',
+    'MCP',
+    'Playwright',
+    'Selenium',
+    'Puppeteer',
+    'Frida',
+    'Ghidra',
+    'Radare2',
+    'Cutter',
+    'Wireshark',
+    'mitmproxy',
+    'bpftrace',
+    'ripgrep',
+    'fd',
+    'jq',
+    'yq'
+  ],
+  communicationChannels: [
+    'Telegram',
+    'Discord',
+    'Slack',
+    'WhatsApp',
+    'Signal',
+    'Matrix',
+    'Microsoft Teams',
+    'Web',
+    'API REST',
+    'CLI',
+    'SSH'
+  ],
+  localModels: [
+    { name: 'llama3.2:1b', fit: 'best-for-weak-machines', recommendedForThisPc: true },
+    { name: 'llama3.2:3b', fit: 'balanced', recommendedForThisPc: true },
+    { name: 'qwen3.5:2b', fit: 'balanced', recommendedForThisPc: true },
+    { name: 'gemma3:4b', fit: 'possible-slow', recommendedForThisPc: true },
+    { name: 'phi4-mini', fit: 'possible-slow', recommendedForThisPc: false },
+    { name: 'deepseek-r1:1.5b', fit: 'reasoning-light', recommendedForThisPc: true },
+    { name: 'deepseek-r1:7b', fit: 'slow-on-this-pc', recommendedForThisPc: false },
+    { name: 'mistral:7b', fit: 'slow-on-this-pc', recommendedForThisPc: false },
+    { name: 'llama3.1:8b', fit: 'very-slow-on-this-pc', recommendedForThisPc: false }
+  ]
+};
