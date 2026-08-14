@@ -2,7 +2,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
-  projectShares, marketplacePlugins,
+  projectShares, marketplacePlugins, marketplaceReviews, marketplaceInstalls,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -493,7 +493,9 @@ export async function getMarketplacePlugin(pluginId: number) {
     .from(marketplacePlugins)
     .where(eq(marketplacePlugins.id, pluginId))
     .limit(1);
-  return result.length > 0 ? result[0] : null;
+  if (result.length === 0) return null;
+  const { reviews, averageRating, reviewCount } = await getMarketplaceReviews(pluginId);
+  return { ...result[0], averageRating, reviewCount };
 }
 
 export async function addMarketplacePlugin(userId: number, data: { name: string; category: "model" | "infra" | "device" | "utility"; description: string; githubUrl?: string; sourceCode?: string; version?: string }) {
@@ -577,4 +579,108 @@ export async function getMyMarketplacePlugins(userId: number) {
   return db.select().from(marketplacePlugins)
     .where(eq(marketplacePlugins.authorId, userId))
     .orderBy(desc(marketplacePlugins.createdAt));
+}
+
+// ---------- Marketplace reviews ----------
+export async function addMarketplaceReview(userId: number, pluginId: number, rating: number, comment: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const existing = await db.select().from(marketplaceReviews)
+    .where(and(eq(marketplaceReviews.userId, userId), eq(marketplaceReviews.pluginId, pluginId)))
+    .limit(1);
+  if (existing.length > 0) {
+    return db.update(marketplaceReviews)
+      .set({ rating, comment })
+      .where(and(eq(marketplaceReviews.userId, userId), eq(marketplaceReviews.pluginId, pluginId)));
+  }
+  return db.insert(marketplaceReviews).values({ userId, pluginId, rating, comment });
+}
+
+export async function getMarketplaceReviews(pluginId: number) {
+  const db = await getDb();
+  if (!db) return { reviews: [], averageRating: 0, reviewCount: 0 };
+  const reviews = await db.select().from(marketplaceReviews)
+    .where(eq(marketplaceReviews.pluginId, pluginId))
+    .orderBy(desc(marketplaceReviews.createdAt));
+  const averageRating = reviews.length > 0
+    ? reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length
+    : 0;
+  return { reviews, averageRating: Math.round(averageRating * 10) / 10, reviewCount: reviews.length };
+}
+
+// Track install per user (dedupe)
+export async function ensureMarketplaceInstall(userId: number, pluginId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(marketplaceInstalls)
+    .where(and(eq(marketplaceInstalls.userId, userId), eq(marketplaceInstalls.pluginId, pluginId)))
+    .limit(1);
+  if (existing.length === 0) {
+    await db.insert(marketplaceInstalls).values({ userId, pluginId });
+  }
+}
+
+// ---------- Admin ----------
+export async function listAllUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: users.id,
+    name: users.name,
+    email: users.email,
+    role: users.role,
+    createdAt: users.createdAt,
+    lastSignedIn: users.lastSignedIn,
+  }).from(users).orderBy(desc(users.lastSignedIn));
+}
+
+export async function updateUserRole(userId: number, role: "user" | "admin") {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  return db.update(users).set({ role }).where(eq(users.id, userId));
+}
+
+export async function setMarketplacePluginApproved(pluginId: number, isApproved: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  return db.update(marketplacePlugins).set({ isApproved }).where(eq(marketplacePlugins.id, pluginId));
+}
+
+export async function listAllMarketplacePlugins() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(marketplacePlugins).orderBy(desc(marketplacePlugins.createdAt));
+}
+
+export async function deleteAnyMarketplacePlugin(pluginId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  await db.delete(marketplaceReviews).where(eq(marketplaceReviews.pluginId, pluginId));
+  await db.delete(marketplaceInstalls).where(eq(marketplaceInstalls.pluginId, pluginId));
+  return db.delete(marketplacePlugins).where(eq(marketplacePlugins.id, pluginId));
+}
+
+export async function getPlatformStats() {
+  const db = await getDb();
+  if (!db) return { users: 0, missions: 0, plugins: 0, marketplacePlugins: 0, memories: 0, pendingPlugins: 0 };
+  const run = async (q: any): Promise<any[]> => {
+    const result = await db.execute(q);
+    return Array.isArray(result) ? (result[0] as unknown as any[]) : [result];
+  };
+  const [usersCount, missionsCount, pluginsCount, mpCount, memoriesCount, pending] = await Promise.all([
+    run(sql`SELECT COUNT(*) as n FROM ${users}`),
+    run(sql`SELECT COUNT(*) as n FROM ${missions}`),
+    run(sql`SELECT COUNT(*) as n FROM ${plugins}`),
+    run(sql`SELECT COUNT(*) as n FROM ${marketplacePlugins}`),
+    run(sql`SELECT COUNT(*) as n FROM ${memory}`),
+    run(sql`SELECT COUNT(*) as n FROM ${marketplacePlugins} WHERE isApproved = 0`),
+  ]);
+  return {
+    users: (usersCount[0] as any)?.n || 0,
+    missions: (missionsCount[0] as any)?.n || 0,
+    plugins: (pluginsCount[0] as any)?.n || 0,
+    marketplacePlugins: (mpCount[0] as any)?.n || 0,
+    memories: (memoriesCount[0] as any)?.n || 0,
+    pendingPlugins: (pending[0] as any)?.n || 0,
+  };
 }

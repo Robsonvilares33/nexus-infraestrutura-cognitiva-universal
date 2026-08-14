@@ -1,11 +1,55 @@
 import { trpc } from "@/lib/trpc";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
-import { BarChart3, TrendingUp, Activity, Database, Loader2, AlertCircle } from "lucide-react";
+import { BarChart3, TrendingUp, Activity, Database, Loader2, AlertCircle, FileDown } from "lucide-react";
+import { useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 
 const COLORS = ["#7cf3ff", "#c9b8ff", "#ffd479", "#3fe7b0", "#ff6b6b", "#a78bfa", "#38bdf8", "#f472b6"];
 
 export default function Analytics() {
   const { data: analytics, isLoading } = trpc.analytics.get.useQuery();
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPDF = async () => {
+    if (!reportRef.current) return;
+    setExporting(true);
+    try {
+      const canvas = await html2canvas(reportRef.current, {
+        backgroundColor: "#020308",
+        scale: 2,
+        useCORS: true,
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth - 20;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 10;
+      pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight - 20;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight + 10;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight - 20;
+      }
+      pdf.save(`nexus-relatorio-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch {
+      // Fallback: use browser print
+      window.print();
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const barData = (analytics?.missionsByDay || []).map((m: any) => ({
     name: new Date(m.day).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
@@ -81,15 +125,30 @@ export default function Analytics() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold text-[#e2e8f4] flex items-center gap-2">
-          <BarChart3 className="h-5 w-5 text-[#ffd479]" />
-          Analytics
-        </h2>
-        <p className="text-[10px] font-mono text-[#7684a0] tracking-wider uppercase">
-          Métricas de uso do ecossistema cognitivo
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-[#e2e8f4] flex items-center gap-2">
+            <BarChart3 className="h-5 w-5 text-[#ffd479]" />
+            Analytics
+          </h2>
+          <p className="text-[10px] font-mono text-[#7684a0] tracking-wider uppercase">
+            Métricas de uso do ecossistema cognitivo
+          </p>
+        </div>
+        <Button
+          onClick={handleExportPDF}
+          disabled={exporting || isLoading}
+          className="bg-[#7cf3ff]/10 text-[#7cf3ff] border border-[#7cf3ff]/20 hover:bg-[#7cf3ff]/20 font-mono text-xs"
+        >
+          {exporting ? (
+            <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+          ) : (
+            <FileDown className="h-3.5 w-3.5 mr-2" />
+          )}
+          {exporting ? "GERANDO PDF..." : "EXPORTAR PDF"}
+        </Button>
       </div>
+      <div ref={reportRef} className="space-y-5">
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -201,6 +260,7 @@ export default function Analytics() {
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -293,3 +293,64 @@ describe("marketplace", () => {
     expect(updated?.upvotes).toBe(before + 1);
   });
 });
+
+describe("reviews", () => {
+  it("adds a review and computes average rating", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const mp = await caller.marketplace.list();
+    const pluginId = mp[0].id;
+    await caller.marketplace.addReview({ pluginId, rating: 4, comment: "Excelente plugin" });
+    const result = await caller.marketplace.reviews({ pluginId });
+    expect(result.reviewCount).toBeGreaterThan(0);
+    expect(result.averageRating).toBeGreaterThan(0);
+    const found = result.reviews.find(r => r.comment === "Excelente plugin");
+    expect(found?.rating).toBe(4);
+  });
+
+  it("replaces the user's own review (dedupe)", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const mp = await caller.marketplace.list();
+    const pluginId = mp[0].id;
+    await caller.marketplace.addReview({ pluginId, rating: 2, comment: "Primeira versão" });
+    await caller.marketplace.addReview({ pluginId, rating: 5, comment: "Atualização" });
+    const result = await caller.marketplace.reviews({ pluginId });
+    // Only one review per user for this plugin
+    expect(result.reviews.filter(r => r.userId === 1).length).toBe(1);
+    expect(result.reviews.find(r => r.userId === 1)?.comment).toBe("Atualização");
+  });
+});
+
+describe("admin", () => {
+  it("rejects non-admin users with FORBIDDEN", async () => {
+    const ctx = createTestContext(); // role: user
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.admin.stats()).rejects.toThrow();
+    await expect(caller.admin.listUsers()).rejects.toThrow();
+    await expect(
+      caller.admin.setRole({ userId: 2, role: "admin" }),
+    ).rejects.toThrow();
+  });
+
+  it("allows admin users to manage users and plugins", async () => {
+    const ctx = createTestContext({
+      user: { ...createTestContext().user!, role: "admin" },
+    });
+    const caller = appRouter.createCaller(ctx);
+    const stats = await caller.admin.stats();
+    expect(typeof stats.users).toBe("number");
+    expect(typeof stats.pendingPlugins).toBe("number");
+
+    const users = await caller.admin.listUsers();
+    expect(Array.isArray(users)).toBe(true);
+    expect(users.some(u => u.role === "admin")).toBe(true);
+
+    const plugins = await caller.admin.listPlugins();
+    expect(Array.isArray(plugins)).toBe(true);
+    if (plugins.length > 0) {
+      const target = plugins[0];
+      await caller.admin.approvePlugin({ pluginId: target.id, isApproved: true });
+    }
+  });
+});

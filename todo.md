@@ -82,3 +82,15 @@
 - [x] Add detail dialog view (description, source code, GitHub link, stats, remove for owner)
 - [x] Fix Recharts PieChart invalid child (removed stray XAxis)
 - [x] Mobile viewport verified for Analytics, Chat, Marketplace
+
+## Phase 5 — Feedback & Administration
+- [x] marketplace_reviews + marketplaceInstalls tables (migration 0006 applied)
+- [x] db.ts helpers for reviews (add/dedupe/list/average rating) + admin helpers (users, roles, moderation, platform stats)
+- [x] marketplace router: addReview / reviews; admin router (stats, listUsers, setRole, listPlugins, approvePlugin, deletePlugin) via adminProcedure
+- [x] Reviews UI in Marketplace detail dialog (star selector, average, list, upsert per user)
+- [x] Owner user promoted to admin; Admin page at /admin with stats, plugin moderation, user management
+- [x] Admin nav item visible only to admins (sidebar, role-gated)
+- [x] PDF report export in Analytics (jsPDF + html2canvas client-side, multi-page A4, fallback to print)
+- [x] Vitest coverage for reviews and admin (26 tests passing)
+- [x] TypeScript clean, tests 26/26, screenshots verified
+- [x] Checkpoint + report

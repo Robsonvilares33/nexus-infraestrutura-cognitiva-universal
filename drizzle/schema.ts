@@ -145,3 +145,27 @@ export const marketplacePlugins = mysqlTable("marketplacePlugins", {
 
 export type MarketplacePlugin = typeof marketplacePlugins.$inferSelect;
 export type InsertMarketplacePlugin = typeof marketplacePlugins.$inferInsert;
+
+// Marketplace Reviews - community ratings and comments
+export const marketplaceReviews = mysqlTable("marketplaceReviews", {
+  id: int("id").autoincrement().primaryKey(),
+  pluginId: int("pluginId").notNull(),
+  userId: int("userId").notNull(),
+  rating: int("rating").notNull(), // 1-5
+  comment: text("comment"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type MarketplaceReview = typeof marketplaceReviews.$inferSelect;
+export type InsertMarketplaceReview = typeof marketplaceReviews.$inferInsert;
+
+// Marketplace installs - tracks which user installed which plugin (dedupe + per-user list)
+export const marketplaceInstalls = mysqlTable("marketplaceInstalls", {
+  id: int("id").autoincrement().primaryKey(),
+  pluginId: int("pluginId").notNull(),
+  userId: int("userId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type MarketplaceInstall = typeof marketplaceInstalls.$inferSelect;
+export type InsertMarketplaceInstall = typeof marketplaceInstalls.$inferInsert;
