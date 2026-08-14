@@ -188,7 +188,15 @@ export async function runAgentLoop(
     } catch (modelError) {
       // Failure tolerance at the model layer: an LLM blip is reported as an
       // observation and the loop tries again (or synthesizes on exhaustion).
-      await persist(userId, missionId, "tool_error", "invokeLLM", undefined, `ERRO do modelo: ${String(modelError).slice(0, 300)}`);
+      // O feed cognitivo é lido por usuários finais: persiste uma mensagem amigável.
+      const raw = String(modelError);
+      const friendly =
+        /timed out/i.test(raw)
+          ? "O modelo de IA demorou para responder — o agente tentará novamente."
+          : /abort/i.test(raw)
+            ? "Conexão com o modelo interrompida — o agente tentará novamente."
+            : "Falha temporária no modelo de IA — o agente tentará novamente.";
+      await persist(userId, missionId, "tool_error", "invokeLLM", undefined, friendly);
       continue;
     }
     const toolCalls: ToolCall[] = ((message as any).tool_calls ?? []) as ToolCall[];
@@ -258,11 +266,13 @@ export async function runAgentLoop(
       }
     } catch (toolError) {
       // Failure tolerance: report the error as the observation; the model adapts.
-      toolResultText = `ERRO na ferramenta ${call.function.name}: ${String(toolError).slice(0, 300)}`;
-      await persist(userId, missionId, "tool_error", call.function.name, undefined, toolResultText);
+      // Mensagem técnica fica apenas no histórico de steps; o feed mostra texto amigável.
+      const rawTool = String(toolError);
+      const friendlyTool = `A ferramenta "${call.function.name}" falhou — o agente ajustou o plano e tentará outro caminho.`;
+      await persist(userId, missionId, "tool_error", call.function.name, undefined, friendlyTool);
       contextWindow.push({ role: "assistant", content: "" });
       (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
-      contextWindow.push({ role: "tool", content: toolResultText, tool_call_id: call.id } as CtxMsg);
+      contextWindow.push({ role: "tool", content: rawTool.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
     }
 
     // Context window compression: drop the oldest observations when too large

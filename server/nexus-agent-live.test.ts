@@ -43,11 +43,19 @@ describe("modo agente — execução real (live)", { timeout: 300_000 }, () => {
     // O upstream de LLM pode ficar degradado de forma transitória (AbortError
     // após as 3 tentativas). Neste cenário a missão deve falhar rápido e de
     // forma explícita (status failed) — nunca ficar travada em 'executing'.
-    const res = (await caller.missions.execute({
-      missionId: mid,
-      input: "Liste 5 startups brasileiras de fintech em alta e sugira 3 estratégias de entrada para uma nova fintech de crédito",
-      mode: "agent",
-    })) as any;
+    // O router re-lança o erro após marcar a missão como failed, então capturar
+    // a exceção também é um sinal válido do caminho degradado.
+    let res: any;
+    let executeThrew = false;
+    try {
+      res = (await caller.missions.execute({
+        missionId: mid,
+        input: "Liste 5 startups brasileiras de fintech em alta e sugira 3 estratégias de entrada para uma nova fintech de crédito",
+        mode: "agent",
+      })) as any;
+    } catch {
+      executeThrew = true;
+    }
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(180_000); // não pode travar por minutos
 
@@ -58,9 +66,11 @@ describe("modo agente — execução real (live)", { timeout: 300_000 }, () => {
       expect(Array.isArray(steps)).toBe(true);
       expect(steps.length).toBeGreaterThan(0);
     } else {
-      // corrida degradada: missão deve terminar em estado final (failed), nunca 'executing'
+      // corrida degradada (res vazio ou exceção re-lançada): missão deve terminar
+      // em estado final (failed), nunca 'executing'
       const list = (await caller.missions.list({})) as any;
       const m = (Array.isArray(list) ? list : list?.missions)?.find?.((x: any) => x.id === mid);
+      expect(executeThrew || !res).toBe(true);
       expect(m?.status).not.toBe("executing");
       expect(m?.status).toBe("failed");
     }
