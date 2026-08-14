@@ -141,9 +141,10 @@ export default function Marketplace() {
   // Public verification query keyed per plugin id (enabled only when id > 0)
   const verificationQuery = trpc.marketplace.verificationPublic.useQuery(
     { pluginId: listVerificationIds[0] ?? -1 },
-    { enabled: (listVerificationIds[0] ?? -1) > 0, refetchOnWindowFocus: false },
+    { enabled: (listVerificationIds[0] ?? -1) > 0, refetchOnWindowFocus: false, staleTime: 300_000, refetchOnMount: false },
   );
-  // Cycle through plugin ids to preload verification status one at a time
+  // Cycle through plugin ids to preload verification status one at a time,
+  // pacing requests so the UI does not flood the server under load.
   useEffect(() => {
     // Start from the first plugin whenever the displayed list changes
     setListVerificationIds(prev => {
@@ -152,12 +153,15 @@ export default function Marketplace() {
     });
     const timer = setInterval(() => {
       setListVerificationIds(prev => {
+        // Wait for the current request to finish before cycling (avoids polling storms)
+        if (verificationQuery.isFetching) return prev;
         const next = pluginIds.filter(id => id !== (prev[0] ?? -1));
         return next.length > 0 ? [next[0]] : [];
       });
-    }, 250);
+    }, 1500);
     return () => clearInterval(timer);
-  }, [pluginIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pluginIds, verificationQuery.isFetching]);
   if (verificationQuery.data && listVerificationIds.length > 0) listVerificationMap[listVerificationIds[0]] = verificationQuery.data;
   const publishMutation = trpc.marketplace.publish.useMutation({
     onSuccess: () => {
