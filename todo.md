@@ -177,8 +177,9 @@
 
 ## Auditoria solicitada (14/08)
 - [x] Verificar sincronização completa com o GitHub (arquivos, commits) — 190/191 arquivos locais no remote; único ausente é .session-notes.md (intencional, contém credenciais)
-- [ ] Teste de estresse como usuário: fluxo completo de missão
-- [ ] Teste de estresse como usuário: plugins, agentes, modelos, memória, universo 3D
-- [ ] Teste de estresse como usuário: marketplace, templates, threads, XP
-- [ ] Teste de estresse como usuário: projetos/colaboração, notificações, conquistas, admin
+- [x] Teste de estresse como usuário: fluxo completo de missão
+- [x] Teste de estresse como usuário: plugins, agentes, modelos, memória, universo 3D
+- [x] Teste de estresse como usuário: marketplace, templates, threads, XP
+- [x] Teste de estresse como usuário: projetos/colaboração, notificações, conquistas, admin
+- [x] Bug corrigidos na auditoria: DataTooLong (confidence arredondado) + missões travadas (try/catch → status=failed) + unificação de identidade (3 contas → 1020001)
 - [ ] Relatório de avaliação + guia de uso + possibilidades
