@@ -1051,3 +1051,15 @@ export async function evaluateAchievements(userId: number): Promise<string[]> {
   await tryUnlock("memory_master", async () => memoryCount >= 100);
   return unlocked;
 }
+
+// Mark achievements as seen by the user.
+export async function markAchievementsSeen(userId: number, badgeKeys: string[]) {
+  const db = await getDb();
+  if (!db) return 0;
+  if (badgeKeys.length === 0) return 0;
+  await db
+    .update(userAchievements)
+    .set({ seenAt: new Date() })
+    .where(and(eq(userAchievements.userId, userId), inArray(userAchievements.badgeKey, badgeKeys)));
+  return badgeKeys.length;
+}

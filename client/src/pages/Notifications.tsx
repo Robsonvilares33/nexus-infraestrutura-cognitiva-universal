@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import NexusLayout from "@/components/NexusLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Bell, CheckCheck, Rocket, Star, Mail, Info, Loader2 } from "lucide-react";
@@ -29,8 +28,7 @@ export function Notifications() {
   const rows = (data ?? []).filter(n => (unreadOnly ? !n.isRead : true));
 
   return (
-    <NexusLayout>
-      <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="max-w-3xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <Bell className="h-6 w-6 text-[#7cf3ff]" />
@@ -110,6 +108,5 @@ export function Notifications() {
           </div>
         )}
       </div>
-    </NexusLayout>
   );
 }

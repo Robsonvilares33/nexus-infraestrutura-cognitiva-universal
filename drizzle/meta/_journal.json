@@ -71,6 +71,13 @@
       "when": 1786705988627,
       "tag": "0009_rare_siren",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786707273980,
+      "tag": "0010_fat_quasimodo",
+      "breakpoints": true
     }
   ]
 }

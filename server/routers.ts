@@ -24,7 +24,7 @@ import {
   getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
   addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks,
   addInAppNotification, markNotificationRead, markAllNotificationsRead, listUserNotifications, countUnreadNotifications,
-  sendEmail, evaluateAchievements, listUserAchievements,
+  sendEmail, evaluateAchievements, listUserAchievements, markAchievementsSeen,
   searchMarketplacePluginsByTerms,
   addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
   getWeeklyGrowthStats, getUserById,
@@ -687,6 +687,7 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
       }))
       .mutation(async ({ ctx, input }) => {
         await addMarketplacePlugin(ctx.user.id, input);
+        await evaluateAchievements(ctx.user.id);
         await addFeedEvent(ctx.user.id, {
           eventType: "agent",
           message: `[Marketplace] Plugin publicado: ${input.name}`,
@@ -924,6 +925,12 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         progress,
       };
     }),
+    markSeen: protectedProcedure
+      .input(z.object({ badgeKeys: z.array(z.string().min(1)) }))
+      .mutation(async ({ ctx, input }) => {
+        await markAchievementsSeen(ctx.user.id, input.badgeKeys);
+        return { success: true };
+      }),
   }),
 });
 export type AppRouter = typeof appRouter;

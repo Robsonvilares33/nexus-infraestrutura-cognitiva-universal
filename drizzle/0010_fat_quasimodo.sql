@@ -1,0 +1,1 @@
+ALTER TABLE `user_achievements` ADD `seen_at` timestamp;

@@ -545,4 +545,53 @@ describe("achievements", () => {
     },
     60000,
   );
+
+  it(
+    "marks unseen unlocks as seen via markSeen",
+    async () => {
+      const ctx = createTestContext();
+      const caller = appRouter.createCaller(ctx);
+
+      // Trigger evaluation so any pending unlocks are recorded.
+      await caller.achievements.list();
+
+      const before = await caller.achievements.list();
+      const unseenKeys = before.unlocked.filter(u => !u.seenAt).map(u => u.badgeKey);
+
+      const markResult = await caller.achievements.markSeen({ badgeKeys: unseenKeys });
+      expect(markResult.success).toBe(true);
+
+      const after = await caller.achievements.list();
+      for (const key of unseenKeys) {
+        const entry = after.unlocked.find(u => u.badgeKey === key);
+        expect(entry).toBeDefined();
+        expect(entry?.seenAt).not.toBeNull();
+      }
+    },
+    60000,
+  );
+
+  it(
+    "unlocks plugin publishing achievements when publishing a plugin",
+    async () => {
+      const ctx = createTestContext();
+      const caller = appRouter.createCaller(ctx);
+
+      const before = await caller.achievements.list();
+      const hasPublisher = before.definitions.some(d => d.key === "first_plugin");
+
+      const publishResult = await caller.marketplace.publish({
+        name: `vitest-mark-${Date.now()}`,
+        description: "Plugin de teste publicado pelo vitest",
+        category: "utility",
+      });
+      expect(publishResult).toBeDefined();
+
+      const after = await caller.achievements.list();
+      if (hasPublisher) {
+        expect(after.definitions.find(d => d.key === "first_plugin")?.unlocked).toBe(true);
+      }
+    },
+    60000,
+  );
 });
