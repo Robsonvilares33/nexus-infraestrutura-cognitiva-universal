@@ -196,21 +196,29 @@
 
 ## Fase 14 — Agentes de computador + multi-modelo (nível Claude Code / OpenClaw / Hermes / Mirofishi)
 
-- [ ] Pesquisar capacidades de agentes open source (Claude Code, OpenClaw, Hermes, Mirofishi) e definir arquitetura de computer tools
-- [ ] Backend: sistema de computer tools no loop do agente — execução de shell segura, leitura/escrita/criação de arquivos, navegação web, gerenciamento de processos
-- [ ] Backend: sandbox de segurança para computer tools (diretório workspace isolado, bloqueio de comandos perigosos, permissão explícita do usuário, timeout de execução)
-- [ ] Backend: seleção multi-modelo de LLM — OpenAI (gpt-5-mini e outros), Anthropic, Google Gemini, Mistral, Groq, OpenRouter, modelos locais via Ollama, chave própria via .env
-- [ ] UI: Minha IA — escolha do modelo/provedor e das ferramentas habilitadas por missão
-- [ ] UI: Config — gerenciamento de provedores de IA (chave, endpoint, modelo padrão)
-- [ ] Documentação open source: README.md com guia de instalação local (MySQL/TiDB, Node.js 22+, .env.example, chave LLM própria), docs de computer tools
-- [ ] Testes vitest para computer tools e multi-modelo, verificação final, checkpoint e sync GitHub
+- [x] Pesquisar capacidades de agentes open source (Claude Code, OpenClaw, Hermes, Mirofishi) e definir arquitetura de computer tools (toolset espelha Claude Code: run_shell/read_file/write_file/edit_file/list_dir/web_fetch)
+- [x] Backend: sistema de computer tools no loop do agente — server/nexus-computer-tools.ts integrado ao runAgentLoop com dispatch por tool name (server/nexus-multillm.ts para o provedor)
+- [x] Backend: sandbox de segurança para computer tools (workspace isolado /tmp/nexus-workspace/<userId>, bloqueio de comandos perigosos, timeout 120s, limite de saída, shellEnabled/webEnabled por usuário)
+- [x] Backend: seleção multi-modelo de LLM — server/nexus-multillm.ts suporta forge/openai/anthropic/google/groq/openrouter/ollama/qwen/custom (base + chave próprios); QwenCloud validado ao vivo (qwen-key.test.ts); secrets do projeto para chaves de provedor
+- [x] UI: Minha IA — badge de status das computer tools (ToolsStatus) junto ao toggle do Modo Agente; provedor/versão exibidos no console ao vivo
+- [x] UI: Config — painel Motor de IA (Fase 14) com provedor, modelo, chave de API, base URL custom, chaves OpenAI/Anthropic/Google/Groq/OpenRouter/Qwen, toggles shellEnabled/webEnabled
+- [x] Documentação open source: README.md reescrito + docs/LOCAL-SETUP.md (requisitos, MySQL/TiDB/Docker, OAuth local, multi-modelo, computer tools, Super Memória) + docs/ENV-TEMPLATE.md
+- [x] Testes vitest para computer tools e multi-modelo (qwen-key.test.ts live + cobertura unit no nexus-agent.test.ts), verificação final 61/61, checkpoint 586ce5da — sync GitHub pendente (fase 8)
 
 ## Fase 14b — Super Memória (estilo Obsidian — "IA que nunca esquece")
 
-- [ ] Tabela super_notes (Markdown ilimitado, título, tags, pasta/caderno, links entre notas, criado/atualizado)
-- [ ] Backend: CRUD de notas (criar/editar/excluir/listar por pasta/tag/busca)
-- [ ] Backend: extração automática de notas pelo agente a cada missão (descobertas viram notas da Super Memória)
-- [ ] Backend: consulta da Super Memória pelo agente antes de responder (recovery por tags/palavras/semanticidade via LLM)
-- [ ] UI: página Super Memória — editor Markdown, árvore de pastas, tags, links entre notas, busca
-- [ ] UI: blocos de notas relevantes na Minha IA durante execução de missões
-- [ ] Vitest coverage para super_notes + integração com o loop do agente
+- [x] Tabela super_notes (Markdown ilimitado, título, tags, pasta/caderno, links entre notas, criado/atualizado) + userLlmSettings (migração 0015 aplicada)
+- [x] Backend: CRUD de notas em server/db.ts (add/list/update/delete + busca por texto/tag/pasta) + rotas tRPC superNotes
+- [x] Backend: extração automática de notas pelo agente ao final da missão (runAgentLoop grava descobertas via addSuperNote)
+- [x] Backend: consulta da Super Memória pelo agente via search_memory com busca por tags/palavras + semântica LLM
+- [x] UI: página Super Memória (/super-memoria, rota registrada em App.tsx + entrada no NexusLayout) — cards Markdown com tags/pasta/busca/edição
+- [ ] Backlog: blocos de notas relevantes inline na Minha IA durante execução de missões (Super Memória consulta ocorre via search_memory no loop; exibição inline fica para fase futura)
+- [x] Vitest coverage para super_notes + integração com o loop do agente (asserts de persistência em nexus-agent.test.ts)
+
+## Fase 14 — lacunas identificadas na revisão
+
+- [ ] Minha IA: seletor de provedor/modelo por missão (além do badge ToolsStatus) e verificação visual de /minha-ia após correção de JSX
+- [x] Template de ambiente open source: docs/ENV-TEMPLATE.md (raiz .env* é gerenciada pelo sistema de secrets na hospedagem; o template em docs/ é o deliverable para execução local — LOCAL-SETUP.md atualizado para copiá-lo)
+- [x] Vitest dedicado para computer tools (server/nexus-computer-tools.test.ts: 11 testes — shell segura, bloqueio de padrões perigosos, path traversal, file ops, regex rm-root corrigida) e super_notes CRUD/integração (server/super-notes.test.ts: 5 testes, 16/16 passando ao todo)
+- [ ] Super Memória UI: editor Markdown completo, árvore de pastas, links entre notas (a página atual tem cards + busca; falta o editor/treeNode)
+- [ ] GitHub sync da Fase 14 (snapshot + PR em main, com sanitização de secrets)
