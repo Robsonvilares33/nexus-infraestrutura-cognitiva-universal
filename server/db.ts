@@ -383,7 +383,7 @@ export async function addFeedEvent(userId: number, data: { eventType: string; me
   const db = await getDb();
   if (!db) return null;
   const vals: any = { userId, eventType: data.eventType, message: data.message };
-  if (data.confidence !== undefined) vals.confidence = data.confidence.toString();
+  if (data.confidence !== undefined) vals.confidence = Number(data.confidence.toFixed(3)).toString();
   if (data.agentName) vals.agentName = data.agentName;
   if (data.missionId) vals.missionId = data.missionId;
   const result = await db.insert(cognitiveFeed).values(vals);
