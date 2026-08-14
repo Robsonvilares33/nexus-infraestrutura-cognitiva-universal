@@ -36,6 +36,22 @@ export default function Marketplace() {
   const [category, setCategory] = useState("all");
   const [queryInput, setQueryInput] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Community-suggested dynamic categories
+  const [suggestName, setSuggestName] = useState("");
+  const { data: approvedCategories } = trpc.categories.listApproved.useQuery();
+  const communityCategories = approvedCategories?.map(c => c.name) ?? [];
+  const suggestMutation = trpc.categories.suggest.useMutation({
+    onSuccess: () => {
+      toast.success("Categoria sugerida! Ela aparecerá após aprovação do administrador.");
+      setSuggestName("");
+      utils.categories.listApproved.invalidate();
+    },
+    onError: (e) => toast.error(e.message || "Erro ao sugerir categoria"),
+  });
+  const voteCategoryMutation = trpc.categories.vote.useMutation({
+    onSuccess: () => utils.categories.listApproved.invalidate(),
+  });
+  const allCategoryNames = [...communityCategories];
   const [detailId, setDetailId] = useState<number | null>(null);
   const { data: detail } = trpc.marketplace.details.useQuery(
     { pluginId: detailId ?? 0 },
@@ -164,6 +180,14 @@ export default function Marketplace() {
                     <SelectItem value="infra">Infraestrutura</SelectItem>
                     <SelectItem value="device">Dispositivo</SelectItem>
                     <SelectItem value="utility">Utilitário</SelectItem>
+                    {allCategoryNames.length > 0 && (
+                      <>
+                        <div className="h-px bg-[rgba(150,175,220,0.15)] my-1" />
+                        {allCategoryNames.map(name => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -241,6 +265,9 @@ export default function Marketplace() {
             <SelectItem value="infra">Infraestrutura</SelectItem>
             <SelectItem value="device">Dispositivos</SelectItem>
             <SelectItem value="utility">Utilitários</SelectItem>
+            {allCategoryNames.map(name => (
+              <SelectItem key={name} value={name}>{name}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <span className="text-[9px] font-mono text-[#7684a0]">{displayPlugins.length} plugins</span>
@@ -478,6 +505,50 @@ export default function Marketplace() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Community-suggested categories */}
+      <div className="nexus-card p-4 space-y-3">
+        <h3 className="text-[10px] font-mono tracking-wider text-[#7684a0]">CATEGORIAS DA COMUNIDADE</h3>
+        <p className="text-[9px] font-mono text-[#7684a0]">
+          Sugira novas categorias para o marketplace. Após aprovação de um administrador, elas aparecem no filtro e no formulário de publicação.
+        </p>
+        {communityCategories.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {approvedCategories!.map(c => (
+              <button
+                key={c.id}
+                onClick={() => voteCategoryMutation.mutate({ categoryId: c.id })}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-[9px] font-mono rounded border border-[rgba(201,184,255,0.25)] bg-[rgba(201,184,255,0.06)] text-[#c9b8ff] hover:bg-[rgba(201,184,255,0.14)] transition-colors"
+              >
+                <Heart className="h-3 w-3" />
+                {c.name}
+                <span className="text-[8px] opacity-70">({c.upvotes})</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[9px] font-mono text-[#7684a0]">Nenhuma categoria da comunidade aprovada ainda.</p>
+        )}
+        <div className="flex items-center gap-2">
+          <Input
+            value={suggestName}
+            onChange={e => setSuggestName(e.target.value)}
+            placeholder="Sugerir nova categoria..."
+            className="flex-1 bg-[rgba(3,5,14,0.8)] border-[rgba(150,175,220,0.12)] text-[#e2e8f4] text-xs font-mono max-w-xs"
+          />
+          <Button
+            onClick={() => {
+              if (!suggestName.trim()) return;
+              suggestMutation.mutate({ name: suggestName.trim() });
+            }}
+            disabled={suggestMutation.isPending || !suggestName.trim()}
+            className="bg-[#c9b8ff]/10 text-[#c9b8ff] border border-[#c9b8ff]/20 hover:bg-[#c9b8ff]/20 font-mono text-[10px]"
+          >
+            {suggestMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+            SUGERIR
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

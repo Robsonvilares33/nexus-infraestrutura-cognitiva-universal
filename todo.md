@@ -106,3 +106,17 @@
 - [x] Vitest coverage for profile and webhooks (31 tests passing)
 - [x] TypeScript clean, screenshots verified (/profile, /marketplace, /minha-ia)
 - [x] Checkpoint + report
+
+## Phase 7 — Email Notifications, Dynamic Categories, Admin Growth Dashboard
+- [x] Platform notifications for mission completion (notifyOwner in missions.execute + scheduled heartbeat callback; platform channel targets project owner — no per-user email API available)
+- [x] Platform notification when a plugin receives a new review (notifyOwner in marketplace.addReview)
+- [x] User email field verified on users table (kept for future email integration)
+- [x] suggestedCategories table (migration 0008 applied)
+- [x] db helpers + router: suggest / listApproved / listPending / vote / admin.approveCategory / admin.deleteCategory / admin.listCategories
+- [x] Marketplace publish Select + category filter include approved community categories
+- [x] "Categorias da Comunidade" section in Marketplace (suggest + vote UI)
+- [x] Admin growth dashboard: weeklyGrowthStats helper + ComposedChart (users/missions/plugins, 8 weeks)
+- [x] Category moderation section in Admin page (approve/reject pending suggestions)
+- [x] Vitest coverage (categories + admin growth, 36 tests passing)
+- [x] TypeScript clean, screenshots verified (/admin, /marketplace), test categories cleaned from DB
+- [x] Checkpoint + report
