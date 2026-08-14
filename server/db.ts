@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
   projectShares, marketplacePlugins, marketplaceReviews, marketplaceInstalls,
+  userProfiles, missionWebhooks,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -683,4 +684,128 @@ export async function getPlatformStats() {
     memories: (memoriesCount[0] as any)?.n || 0,
     pendingPlugins: (pending[0] as any)?.n || 0,
   };
+}
+
+// ---------- User profiles ----------
+export async function getUserProfile(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function upsertUserProfile(userId: number, data: { bio?: string; avatar?: string; preferences?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const existing = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+  if (existing.length > 0) {
+    return db.update(userProfiles)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(userProfiles.userId, userId));
+  }
+  return db.insert(userProfiles).values({ userId, ...data });
+}
+
+// Personal history for profile page
+export async function getUserMissionsHistory(userId: number, limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(missions)
+    .where(eq(missions.userId, userId))
+    .orderBy(desc(missions.createdAt))
+    .limit(limit);
+}
+
+export async function getUserInstalledPlugins(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(plugins).where(eq(plugins.userId, userId));
+}
+
+export async function getUserMarketplaceInstalls(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const installs = await db.select().from(marketplaceInstalls).where(eq(marketplaceInstalls.userId, userId));
+  if (installs.length === 0) return [];
+  return db.select().from(marketplacePlugins)
+    .where(sql`${marketplacePlugins.id} IN (${sql.join(installs.map(i => sql`${i.pluginId}`), sql`, `)})`);
+}
+
+export async function getUserReviews(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(marketplaceReviews).where(eq(marketplaceReviews.userId, userId)).orderBy(desc(marketplaceReviews.createdAt));
+}
+
+export async function getUserSharedProjects(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(projectShares).where(eq(projectShares.sharedByUserId, userId)).orderBy(desc(projectShares.createdAt));
+}
+
+// ---------- Mission webhooks ----------
+export async function addMissionWebhook(missionId: number, userId: number, url: string, label?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  // Ownership check
+  const m = await db.select().from(missions).where(eq(missions.id, missionId)).limit(1);
+  if (m.length === 0 || m[0].userId !== userId) throw new Error("Missão não encontrada ou não pertence a você");
+  return db.insert(missionWebhooks).values({ missionId, url, label });
+}
+
+export async function listMissionWebhooks(missionId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const m = await db.select().from(missions).where(eq(missions.id, missionId)).limit(1);
+  if (m.length === 0 || m[0].userId !== userId) return [];
+  return db.select().from(missionWebhooks).where(eq(missionWebhooks.missionId, missionId));
+}
+
+export async function removeMissionWebhook(webhookId: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const hooks = await db.select().from(missionWebhooks).where(eq(missionWebhooks.id, webhookId)).limit(1);
+  if (hooks.length === 0) return;
+  const m = await db.select().from(missions).where(eq(missions.id, hooks[0].missionId)).limit(1);
+  if (!m[0] || m[0].userId !== userId) throw new Error("Webhook não pertence a você");
+  return db.delete(missionWebhooks).where(eq(missionWebhooks.id, webhookId));
+}
+
+export async function fireMissionWebhooks(missionId: number, payload: Record<string, unknown>) {
+  const db = await getDb();
+  if (!db) return;
+  const hooks = await db.select().from(missionWebhooks).where(eq(missionWebhooks.missionId, missionId));
+  for (const hook of hooks) {
+    try {
+      const res = await fetch(hook.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "NEXUS-MissionWebhook/1.0" },
+        body: JSON.stringify({ missionId, event: "mission.completed", payload, timestamp: new Date().toISOString() }),
+        signal: AbortSignal.timeout(10000),
+      });
+      await db.update(missionWebhooks)
+        .set({ lastStatus: res.status, lastTriggeredAt: new Date() })
+        .where(eq(missionWebhooks.id, hook.id));
+    } catch {
+      await db.update(missionWebhooks)
+        .set({ lastStatus: 0, lastTriggeredAt: new Date() })
+        .where(eq(missionWebhooks.id, hook.id));
+    }
+  }
+}
+
+// Semantic-ish search: match plugins whose name/description/tags contain any of the given terms
+export async function searchMarketplacePluginsByTerms(terms: string[], limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  if (terms.length === 0) return [];
+  const conditions = terms.map(t => {
+    const term = `%${t.toLowerCase()}%`;
+    return sql`(${marketplacePlugins.name} LIKE ${term} OR ${marketplacePlugins.description} LIKE ${term})`;
+  });
+  return db.select()
+    .from(marketplacePlugins)
+    .where(sql`(${sql.join(conditions, sql` OR `)}) AND ${marketplacePlugins.isApproved} = 1`)
+    .orderBy(desc(marketplacePlugins.downloads), desc(marketplacePlugins.upvotes))
+    .limit(limit);
 }

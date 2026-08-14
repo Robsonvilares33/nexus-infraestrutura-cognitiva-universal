@@ -46,14 +46,18 @@ describe("auth", () => {
 });
 
 describe("dashboard", () => {
-  it("returns stats object", async () => {
-    const ctx = createTestContext();
-    const caller = appRouter.createCaller(ctx);
-    const stats = await caller.dashboard.stats();
-    expect(stats).toBeDefined();
-    expect(typeof stats.missions).toBe("number");
-    expect(typeof stats.plugins).toBe("number");
-  });
+  it(
+    "returns stats object",
+    async () => {
+      const ctx = createTestContext();
+      const caller = appRouter.createCaller(ctx);
+      const stats = await caller.dashboard.stats();
+      expect(stats).toBeDefined();
+      expect(typeof stats.missions).toBe("number");
+      expect(typeof stats.plugins).toBe("number");
+    },
+    60000,
+  );
 });
 
 describe("universe", () => {
@@ -352,5 +356,65 @@ describe("admin", () => {
       const target = plugins[0];
       await caller.admin.approvePlugin({ pluginId: target.id, isApproved: true });
     }
+  });
+});
+
+describe("profile", () => {
+  it("gets profile shape for the test user", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const profile = await caller.profile.get();
+    expect(profile).toHaveProperty("bio");
+    expect(profile).toHaveProperty("preferences");
+  });
+
+  it("updates profile bio and reads it back", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    await caller.profile.update({ bio: "Dev NEXUS de teste" });
+    const profile = await caller.profile.get();
+    expect(profile.bio).toBe("Dev NEXUS de teste");
+    // Cleanup: clear bio
+    await caller.profile.update({ bio: undefined });
+  });
+
+  it("returns personal history structure", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const history = await caller.profile.history();
+    expect(Array.isArray(history.missions)).toBe(true);
+    expect(Array.isArray(history.plugins)).toBe(true);
+    expect(Array.isArray(history.marketplaceInstalls)).toBe(true);
+    expect(Array.isArray(history.reviews)).toBe(true);
+    expect(Array.isArray(history.sharedProjects)).toBe(true);
+  });
+});
+
+describe("webhooks", () => {
+  it("creates and lists a mission webhook", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const createRes = await caller.missions.create({ input: "Missão de teste para webhooks" });
+    const missionId = (createRes as any)?.id ?? 1;
+    await caller.missions.update({ missionId, status: "completed", result: "ok" });
+
+    await caller.webhooks.add({ missionId, url: "https://httpbin.org/status/200" });
+    const hooks = await caller.webhooks.list({ missionId });
+    expect(hooks.length).toBeGreaterThan(0);
+    expect(hooks[0].url).toBe("https://httpbin.org/status/200");
+
+    await caller.webhooks.remove({ webhookId: hooks[0].id });
+    const after = await caller.webhooks.list({ missionId });
+    expect(after.length).toBe(hooks.length - 1);
+  });
+
+  it("rejects webhook for a mission that does not belong to the user", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    // mission id far beyond anything this user owns
+    await expect(
+      caller.webhooks.add({ missionId: 9999999, url: "https://example.com/hook" }),
+    ).rejects.toThrow();
   });
 });

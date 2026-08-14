@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
-import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2 } from "lucide-react";
+import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription
@@ -27,8 +27,35 @@ export default function MinhaIA() {
   const unscheduleMutation = trpc.missions.unschedule.useMutation();
   const { data: scheduledMissions, refetch: refetchScheduled } = trpc.missions.listScheduled.useQuery();
   const [input, setInput] = useState("");
+  const [hookMissionId, setHookMissionId] = useState<number | null>(null);
+  const [hookUrl, setHookUrl] = useState("");
+  const { data: webhooks, refetch: refetchWebhooks } = trpc.webhooks.list.useQuery(
+    { missionId: hookMissionId ?? 0 },
+    { enabled: hookMissionId !== null },
+  );
+  const addWebhookMutation = trpc.webhooks.add.useMutation({
+    onSuccess: () => {
+      toast.success("Webhook registrado! Será acionado quando a missão for executada.");
+      setHookUrl("");
+      refetchWebhooks();
+    },
+    onError: e => toast.error(e.message || "Erro ao registrar webhook"),
+  });
+  const removeWebhookMutation = trpc.webhooks.remove.useMutation({
+    onSuccess: () => refetchWebhooks(),
+    onError: e => toast.error(e.message || "Erro ao remover webhook"),
+  });
+
+  const handleAddWebhook = () => {
+    if (!hookMissionId || !hookUrl.trim()) {
+      toast.error("Informe a URL do webhook.");
+      return;
+    }
+    addWebhookMutation.mutate({ missionId: hookMissionId, url: hookUrl.trim() });
+  };
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+
   const [scheduleMissionId, setScheduleMissionId] = useState<number | null>(null);
   const [cronExpression, setCronExpression] = useState("0 0 9 * * *");
   const [cronPreset, setCronPreset] = useState("daily_9am");
@@ -318,6 +345,71 @@ export default function MinhaIA() {
               )}
               {m.isScheduled && (
                 <span className="text-[8px] font-mono text-[#ffd479]">⏰</span>
+              )}
+              {/* Webhook button for completed missions */}
+              {m.status === 'completed' && (
+                <Dialog open={hookMissionId === m.id} onOpenChange={open => {
+                  setHookMissionId(open ? m.id : null);
+                  if (!open) setHookUrl("");
+                }}>
+                  <DialogTrigger asChild>
+                    <button className="text-[#3fe7b0] hover:text-[#3fe7b0]/80 transition-colors shrink-0" title="Webhooks">
+                      <Webhook className="h-3.5 w-3.5" />
+                    </button>
+                  </DialogTrigger>
+                  <DialogContent className="bg-[#0a0f1a] border-[rgba(150,175,220,0.12)] text-[#e2e8f4]">
+                    <DialogHeader>
+                      <DialogTitle className="text-sm font-mono text-[#e2e8f4] flex items-center gap-2">
+                        <Webhook className="h-4 w-4 text-[#3fe7b0]" /> Webhooks da Missão
+                      </DialogTitle>
+                      <DialogDescription className="text-[10px] font-mono text-[#7684a0]">
+                        URLs externas acionadas automaticamente quando esta missão é executada.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="flex gap-2">
+                        <Input
+                          value={hookUrl}
+                          onChange={e => setHookUrl(e.target.value)}
+                          placeholder="https://seu-servico.com/webhook"
+                          className="bg-[rgba(3,5,14,0.8)] border-[rgba(150,175,220,0.12)] text-[#e2e8f4] text-xs font-mono flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleAddWebhook}
+                          disabled={addWebhookMutation.isPending}
+                          className="bg-[#3fe7b0]/10 text-[#3fe7b0] border border-[#3fe7b0]/30 hover:bg-[#3fe7b0]/20 text-[10px] font-mono shrink-0"
+                        >
+                          ADICIONAR
+                        </Button>
+                      </div>
+                      {!webhooks?.length ? (
+                        <p className="text-[10px] font-mono text-[#7684a0]">Nenhum webhook cadastrado.</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-40 overflow-auto">
+                          {webhooks.map(h => (
+                            <div key={h.id} className="flex items-center gap-2 bg-[rgba(3,5,14,0.8)] border border-[rgba(150,175,220,0.08)] p-2">
+                              <Webhook className="h-3 w-3 text-[#3fe7b0] shrink-0" />
+                              <p className="text-[9px] font-mono text-[#aab4d6] truncate flex-1" title={h.url}>{h.url}</p>
+                              {h.lastStatus !== null && h.lastStatus !== undefined && (
+                                <span className={`text-[8px] font-mono px-1.5 py-0.5 border shrink-0 ${h.lastStatus >= 200 && h.lastStatus < 300 ? "text-[#3fe7b0] border-[rgba(63,231,176,0.25)]" : "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]"}`}>
+                                  HTTP {h.lastStatus}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => removeWebhookMutation.mutate({ webhookId: h.id })}
+                                className="text-[#ff7a8c] hover:text-[#ff7a8c]/80 transition-colors shrink-0"
+                                aria-label="Remover webhook"
+                              >
+                                <Trash className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </DialogContent>
+                </Dialog>
               )}
             </div>
           )) : (
