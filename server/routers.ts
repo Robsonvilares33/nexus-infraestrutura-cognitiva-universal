@@ -48,6 +48,21 @@ import { broadcastNotificationPush } from "./socket";
 import { memory, marketplaceReviews, missions, marketplacePlugins } from "../drizzle/schema";
 import { ACHIEVEMENTS } from "./db";
 
+// O feed cognitivo é lido por usuários finais: converte erros técnicos brutos
+// (AbortError, timeouts do upstream de LLM) em mensagens humanas e amigáveis.
+function friendlyMissionError(raw: string): string {
+  if (/aborted|AbortError/i.test(raw)) {
+    return "A conexão com o serviço de IA foi interrompida — a missão foi encerrada. Tente novamente em instantes.";
+  }
+  if (/timed out|timeout/i.test(raw)) {
+    return "O serviço de IA demorou demais para responder — a missão foi encerrada. Tente novamente em instantes.";
+  }
+  if (/network|fetch|undici|ECONNRESET|ENOTFOUND/i.test(raw)) {
+    return "Houve um problema temporário de rede com o serviço de IA — a missão foi encerrada. Tente novamente em instantes.";
+  }
+  return "A missão não pôde ser concluída no momento por um erro temporário. Tente novamente em instantes.";
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -307,7 +322,8 @@ export const appRouter = router({
         } catch (error) {
           try {
             await updateMission(userId, missionId, { status: "failed", completedAt: new Date() }).catch(() => {});
-            await addFeedEvent(userId, { eventType: "error", message: `Missão falhou no Modo Agente: ${String(error).slice(0, 400)}`, missionId }).catch(() => {});
+            const friendly = friendlyMissionError(String(error));
+            await addFeedEvent(userId, { eventType: "error", message: friendly, missionId }).catch(() => {});
           } catch { /* failure reporting must never throw */ }
           throw error;
         }
@@ -442,7 +458,7 @@ export const appRouter = router({
           await updateMission(ctx.user.id, input.missionId, { status: 'failed', completedAt: new Date() }).catch(() => {});
           await addFeedEvent(ctx.user.id, {
             eventType: 'error',
-            message: `Missão falhou durante a execução: ${String(error).slice(0, 400)}`,
+            message: friendlyMissionError(String(error)),
             missionId: input.missionId,
           }).catch(() => {});
         } catch { /* failure reporting must never throw */ }
@@ -459,7 +475,7 @@ export const appRouter = router({
       } catch (error) {
         try {
           await updateMission(userId, input.missionId, { status: 'failed', completedAt: new Date() }).catch(() => {});
-          await addFeedEvent(userId, { eventType: 'error', message: `Falha no loop do agente: ${String(error).slice(0, 400)}`, missionId: input.missionId }).catch(() => {});
+          await addFeedEvent(userId, { eventType: 'error', message: friendlyMissionError(String(error)), missionId: input.missionId }).catch(() => {});
         } catch { /* failure reporting must never throw */ }
         throw error;
       }
