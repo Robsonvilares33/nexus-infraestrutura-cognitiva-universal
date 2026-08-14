@@ -277,6 +277,17 @@ export const xpEvents = mysqlTable("xp_events", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// Phase 13 (Manus fusion): agent loop steps — persisted think-act-observe history
+export const missionSteps = mysqlTable("missionSteps", {
+  id: int("id").autoincrement().primaryKey(),
+  missionId: int("missionId").notNull(),
+  stepType: varchar("stepType", { length: 32 }).notNull(),
+  toolName: varchar("toolName", { length: 64 }),
+  agentName: varchar("agentName", { length: 64 }),
+  detail: text("detail"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 // Phase 11: Mission templates — ready-made mission blueprints from the marketplace
 export const missionTemplates = mysqlTable("missionTemplates", {
   id: int("id").autoincrement().primaryKey(),
