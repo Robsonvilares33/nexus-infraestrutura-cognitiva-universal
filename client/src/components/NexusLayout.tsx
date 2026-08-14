@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
-  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu
+  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const NAV_ITEMS = [
   { path: "/", label: "Home", icon: Home },
@@ -28,6 +29,7 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
   const [location] = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   // All hooks must be at top level
   const seededRef = useRef(false);
@@ -166,6 +168,15 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
               </h1>
             </div>
             <div className="flex items-center gap-2">
+              {toggleTheme && (
+                <button
+                  onClick={toggleTheme}
+                  className="flex items-center justify-center w-7 h-7 rounded-md border border-[rgba(150,175,220,0.12)] text-[#7684a0] hover:text-[#7cf3ff] hover:border-[rgba(124,243,255,0.2)] transition-colors"
+                  title="Alternar tema"
+                >
+                  {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+                </button>
+              )}
               <span className="nexus-chip nexus-chip-online">CONECTADO</span>
               <span className="hidden sm:block text-[9px] font-mono text-[#7684a0]">
                 ID: {user?.id}

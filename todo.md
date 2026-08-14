@@ -48,3 +48,11 @@
   - projectShares table created
   - share/getShares/sharedWithMe/removeShare endpoints
   - Share button added to Projetos page
+
+## Phase 3 Features
+- [x] Scheduled missions with Heartbeat/SSE
+  - schedule/unschedule/listScheduled endpoints
+  - /api/scheduled/mission-{id} callback endpoint
+  - DB columns: scheduleCronTaskUid, isScheduled
+- [x] Push notifications for mission completion (both regular and scheduled)
+- [x] Light/dark theme toggle (ThemeProvider switchable + button in header)

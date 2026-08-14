@@ -74,6 +74,8 @@ export const missions = mysqlTable("missions", {
   startedAt: datetime("startedAt"),
   completedAt: datetime("completedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
+  isScheduled: boolean("isScheduled").default(false).notNull(),
 });
 
 // Memory

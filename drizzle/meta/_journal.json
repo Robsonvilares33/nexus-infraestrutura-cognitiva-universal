@@ -29,6 +29,13 @@
       "when": 1786651118032,
       "tag": "0003_wooden_puppet_master",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1786673820484,
+      "tag": "0004_short_pyro",
+      "breakpoints": true
     }
   ]
 }

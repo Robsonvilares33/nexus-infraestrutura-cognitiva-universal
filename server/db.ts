@@ -441,3 +441,30 @@ export async function getUsersByIds(ids: number[]) {
     .from(users)
     .where(sql`id IN (${sql.join(ids, sql`, `)})`);
 }
+
+// Scheduled Missions
+export async function getScheduledMissions(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(missions)
+    .where(and(eq(missions.userId, userId), eq(missions.isScheduled, true)))
+    .orderBy(desc(missions.createdAt));
+}
+
+export async function updateMissionSchedule(userId: number, missionId: number, scheduleCronTaskUid: string | null, isScheduled: boolean) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.update(missions)
+    .set({ scheduleCronTaskUid, isScheduled })
+    .where(and(eq(missions.userId, userId), eq(missions.id, missionId)));
+}
+
+export async function getMissionByCronTaskUid(taskUid: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select()
+    .from(missions)
+    .where(eq(missions.scheduleCronTaskUid, taskUid))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}

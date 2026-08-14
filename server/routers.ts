@@ -14,6 +14,7 @@ import {
   getUniverseSettings, saveUniverseSettings,
   addValidatedTool,
   shareProject, getSharedProjects, getProjectShares, removeProjectShare, getUsersByIds,
+  getScheduledMissions, updateMissionSchedule,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -153,6 +154,64 @@ export const appRouter = router({
     update: protectedProcedure
       .input(z.object({ missionId: z.number(), status: z.string().optional(), result: z.string().optional(), resultType: z.string().optional(), confidence: z.number().optional() }))
       .mutation(async ({ ctx, input }) => { const { missionId, ...data } = input; return updateMission(ctx.user.id, missionId, data); }),
+    // Scheduled Missions
+    schedule: protectedProcedure
+      .input(z.object({ missionId: z.number(), cron: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        const { getDb } = await import("./db");
+        const { missions: missionsTable } = await import("../drizzle/schema");
+        const { eq: drizzleEq } = await import("drizzle-orm");
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        // Verify the mission exists and belongs to the user
+        const mission = await getMissionById(ctx.user.id, input.missionId);
+        if (!mission) throw new Error("Mission not found");
+
+        // Create the Heartbeat job
+        const { createHeartbeatJob } = await import("./_core/heartbeat");
+        // Get the session cookie value for user identity
+        const cookies = ctx.req.headers.cookie || "";
+        const sessionMatch = cookies.match(/app_session_id=([^;]+)/);
+        const userSession = sessionMatch ? sessionMatch[1] : "";
+
+        const { taskUid } = await createHeartbeatJob(
+          {
+            name: `nexus-mission-${input.missionId}`,
+            cron: input.cron,
+            path: `/api/scheduled/mission-${input.missionId}`,
+            method: "POST",
+            payload: { missionId: input.missionId, userId: ctx.user.id },
+            description: `Scheduled mission: ${mission.input.slice(0, 80)}`,
+          },
+          userSession
+        );
+
+        // Update the mission with the schedule
+        await updateMissionSchedule(ctx.user.id, input.missionId, taskUid, true);
+
+        return { success: true, taskUid };
+      }),
+
+    unschedule: protectedProcedure
+      .input(z.object({ missionId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const mission = await getMissionById(ctx.user.id, input.missionId);
+        if (!mission || !mission.scheduleCronTaskUid) throw new Error("Mission not found or not scheduled");
+
+        const { deleteHeartbeatJob } = await import("./_core/heartbeat");
+        const cookies = ctx.req.headers.cookie || "";
+        const sessionMatch = cookies.match(/app_session_id=([^;]+)/);
+        const userSession = sessionMatch ? sessionMatch[1] : "";
+
+        await deleteHeartbeatJob(mission.scheduleCronTaskUid, userSession);
+        await updateMissionSchedule(ctx.user.id, input.missionId, null, false);
+
+        return { success: true };
+      }),
+
+    listScheduled: protectedProcedure.query(async ({ ctx }) => getScheduledMissions(ctx.user.id)),
+
     execute: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string() })).mutation(async ({ ctx, input }) => {
       const userId = ctx.user.id;
       const missionId = input.missionId;
@@ -258,6 +317,17 @@ export const appRouter = router({
       await addMemory(userId, { content: `Missão: ${input.input}\nResultado: ${resultText}`, confidence, origin: 'mission', tags: ['mission', 'result'] });
       await updateMission(userId, missionId, { status: 'completed', result: resultText, confidence, completedAt: new Date() });
       await addFeedEvent(userId, { eventType: 'complete', message: `Missão concluída — confiança: ${Math.round(confidence * 100)}%`, missionId, confidence });
+
+      // Send notification about mission completion
+      try {
+        const { notifyOwner } = await import("./_core/notification");
+        await notifyOwner({
+          title: `[NEXUS] Missão Concluída`,
+          content: `Missão concluída com confiança de ${Math.round(confidence * 100)}%. ${input.input.slice(0, 100)}`,
+        });
+      } catch {
+        // Notification is optional
+      }
 
       return { interpretation: interp, tasks: plan.tasks, result: resultText, confidence };
     }),

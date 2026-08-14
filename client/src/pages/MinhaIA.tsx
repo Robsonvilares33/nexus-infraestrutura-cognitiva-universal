@@ -1,7 +1,13 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
-import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface LiveEvent {
   eventType: string;
@@ -17,8 +23,15 @@ export default function MinhaIA() {
   const { data: feed } = trpc.feed.list.useQuery({ limit: 50 });
   const createMutation = trpc.missions.create.useMutation();
   const executeMutation = trpc.missions.execute.useMutation();
+  const scheduleMutation = trpc.missions.schedule.useMutation();
+  const unscheduleMutation = trpc.missions.unschedule.useMutation();
+  const { data: scheduledMissions, refetch: refetchScheduled } = trpc.missions.listScheduled.useQuery();
   const [input, setInput] = useState("");
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleMissionId, setScheduleMissionId] = useState<number | null>(null);
+  const [cronExpression, setCronExpression] = useState("0 0 9 * * *");
+  const [cronPreset, setCronPreset] = useState("daily_9am");
   const feedRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const { data: user } = trpc.auth.me.useQuery();
@@ -65,6 +78,41 @@ export default function MinhaIA() {
     await executeMutation.mutateAsync({ missionId: mid, input: input.trim() });
     setInput("");
     refetchMissions();
+  };
+
+  const handleSchedule = async () => {
+    if (!scheduleMissionId) return;
+    try {
+      await scheduleMutation.mutateAsync({ missionId: scheduleMissionId, cron: cronExpression });
+      toast.success("Missão agendada com sucesso!");
+      setScheduleDialogOpen(false);
+      refetchMissions();
+      refetchScheduled();
+    } catch (error) {
+      toast.error("Erro ao agendar missão: " + String(error));
+    }
+  };
+
+  const handleUnschedule = async (missionId: number) => {
+    try {
+      await unscheduleMutation.mutateAsync({ missionId });
+      toast.success("Agendamento cancelado.");
+      refetchMissions();
+      refetchScheduled();
+    } catch (error) {
+      toast.error("Erro ao cancelar agendamento: " + String(error));
+    }
+  };
+
+  const handlePresetChange = (preset: string) => {
+    setCronPreset(preset);
+    switch (preset) {
+      case "daily_9am": setCronExpression("0 0 9 * * *"); break;
+      case "daily_6pm": setCronExpression("0 0 18 * * *"); break;
+      case "weekly_mon": setCronExpression("0 0 9 * * 1"); break;
+      case "hourly": setCronExpression("0 0 * * * *"); break;
+      default: setCronExpression("0 0 9 * * *");
+    }
   };
 
   // Merge live events with DB feed (dedupe by message)
@@ -166,6 +214,31 @@ export default function MinhaIA() {
         </div>
       </div>
 
+      {/* Scheduled Missions */}
+      {scheduledMissions && scheduledMissions.length > 0 && (
+        <div>
+          <p className="text-[9px] font-mono text-[#7684a0] tracking-wider uppercase mb-3 flex items-center gap-2">
+            <Timer className="h-3 w-3 text-[#ffd479]" /> MISSÕES AGENDADAS ({scheduledMissions.length})
+          </p>
+          <div className="space-y-2">
+            {scheduledMissions.map(m => (
+              <div key={m.id} className="nexus-card p-3 flex items-center gap-3">
+                <span className="nexus-chip nexus-chip-pending shrink-0">AGENDADA</span>
+                <p className="text-xs font-mono text-[#aab4d6] flex-1 truncate">{m.input}</p>
+                <span className="text-[8px] font-mono text-[#ffd479]">{cronPreset}</span>
+                <button
+                  onClick={() => handleUnschedule(m.id)}
+                  className="text-[#ff6b6b] hover:text-[#ff6b6b]/80 transition-colors"
+                  title="Cancelar agendamento"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent Missions */}
       <div>
         <p className="text-[9px] font-mono text-[#7684a0] tracking-wider uppercase mb-3">MISSÕES RECENTES</p>
@@ -179,6 +252,73 @@ export default function MinhaIA() {
               }`}>{m.status.toUpperCase()}</span>
               <p className="text-xs font-mono text-[#aab4d6] flex-1 truncate">{m.input}</p>
               <span className="text-[8px] font-mono text-[#7684a0]">{new Date(m.createdAt).toLocaleDateString()}</span>
+              {/* Schedule button for completed missions */}
+              {m.status === 'completed' && !m.isScheduled && (
+                <Dialog open={scheduleDialogOpen && scheduleMissionId === m.id} onOpenChange={open => {
+                  setScheduleDialogOpen(open);
+                  if (open) setScheduleMissionId(m.id);
+                }}>
+                  <DialogTrigger asChild>
+                    <button className="text-[#ffd479] hover:text-[#ffd479]/80 transition-colors" title="Agendar">
+                      <Calendar className="h-3.5 w-3.5" />
+                    </button>
+                  </DialogTrigger>
+                  <DialogContent className="bg-[#0a0f1a] border-[rgba(150,175,220,0.12)] text-[#e2e8f4]">
+                    <DialogHeader>
+                      <DialogTitle className="text-sm font-mono text-[#e2e8f4]">Agendar Missão</DialogTitle>
+                      <DialogDescription className="text-[10px] font-mono text-[#7684a0]">
+                        Configure a frequência de execução automática desta missão.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-mono text-[#7684a0] block mb-2">Frequência:</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { value: "daily_9am", label: "Diário 09:00" },
+                            { value: "daily_6pm", label: "Diário 18:00" },
+                            { value: "weekly_mon", label: "Semanal (Seg)" },
+                            { value: "hourly", label: "A cada hora" },
+                          ].map(preset => (
+                            <button
+                              key={preset.value}
+                              onClick={() => handlePresetChange(preset.value)}
+                              className={`px-3 py-2 text-[10px] font-mono rounded border transition-colors ${
+                                cronPreset === preset.value
+                                  ? "border-[#7cf3ff]/50 bg-[#7cf3ff]/10 text-[#7cf3ff]"
+                                  : "border-[rgba(150,175,220,0.1)] text-[#7684a0] hover:border-[rgba(150,175,220,0.2)]"
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-[#7684a0] block mb-2">Expressão Cron (UTC):</label>
+                        <Input
+                          value={cronExpression}
+                          onChange={e => setCronExpression(e.target.value)}
+                          className="nexus-card bg-transparent text-[#e2e8f4] font-mono text-xs"
+                          placeholder="0 0 9 * * *"
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setScheduleDialogOpen(false)} className="border-[rgba(150,175,220,0.15)] text-[#aab4d6]">
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleSchedule} disabled={scheduleMutation.isPending} className="bg-[#7cf3ff]/10 text-[#7cf3ff] border border-[#7cf3ff]/30 hover:bg-[#7cf3ff]/20">
+                        <Timer className="h-4 w-4 mr-1" />
+                        Agendar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+              {m.isScheduled && (
+                <span className="text-[8px] font-mono text-[#ffd479]">⏰</span>
+              )}
             </div>
           )) : (
             <p className="text-[10px] font-mono text-[#7684a0] text-center py-4 nexus-card">Nenhuma missão executada.</p>
