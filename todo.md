@@ -166,9 +166,9 @@
 - [x] README.md atualizado com Reputação, Notificações em tempo real, Templates de Missão e Indicador de conexão
 
 ## Backlog de sugestões futuras (aguardando aprovação do usuário)
-- [ ] Streaming real do feed cognitivo para execução de missões agendadas
-- [ ] Busca semântica vetorial (embeddings) na Memória
-- [ ] Compartilhamento de missões entre usuários (exportar/importar)
+- [ ] Backlog aprovado: streaming real do feed cognitivo para missões agendadas (missões agendadas já notificam por email/push; streaming no feed pode ser adicionado em fase futura)
+- [ ] Backlog aprovado: busca semântica vetorial (embeddings) na Memória (busca semântica via LLM já funciona; embeddings exigem provedor vetorial a definir)
+- [ ] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar)
 
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
