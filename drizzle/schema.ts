@@ -214,6 +214,7 @@ export const userAchievements = mysqlTable("user_achievements", {
   userId: int("user_id").notNull(),
   badgeKey: varchar("badge_key", { length: 64 }).notNull(),
   unlockedAt: timestamp("unlocked_at").defaultNow().notNull(),
+  seenAt: timestamp("seen_at"),
 });
 
 export const suggestedCategories = mysqlTable("suggestedCategories", {
