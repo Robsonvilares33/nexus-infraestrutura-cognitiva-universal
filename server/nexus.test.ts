@@ -148,3 +148,148 @@ describe("feed", () => {
     expect(feed[0]?.message).toBe("Test event");
   });
 });
+
+describe("analytics", () => {
+  it("returns metrics with expected shape", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    await caller.universe.seed();
+    // Create a mission so missionsByDay/avgConfidence have data
+    await caller.missions.create({
+      input: "Análise de mercado de tecnologia",
+    });
+    const analytics = await caller.analytics.get();
+    expect(analytics).toBeDefined();
+    expect(Array.isArray(analytics.missionsByDay)).toBe(true);
+    expect(typeof analytics.avgConfidence).toBe("number");
+    expect(Array.isArray(analytics.agentsActivity)).toBe(true);
+    expect(Array.isArray(analytics.memoryByTier)).toBe(true);
+  });
+
+  it("returns rows with expected field format", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const analytics = await caller.analytics.get();
+    expect(analytics).toBeDefined();
+    expect(Array.isArray(analytics.missionsByDay)).toBe(true);
+    for (const row of analytics.missionsByDay) {
+      expect(row).toHaveProperty("day");
+      expect(row).toHaveProperty("count");
+      expect(typeof (row as any).count).toBe("number");
+    }
+    expect(Array.isArray(analytics.agentsActivity)).toBe(true);
+    for (const row of analytics.agentsActivity) {
+      expect(row).toHaveProperty("agentName");
+      expect(row).toHaveProperty("count");
+    }
+    expect(Array.isArray(analytics.memoryByTier)).toBe(true);
+    expect(typeof analytics.avgConfidence).toBe("number");
+  });
+});
+
+describe(
+  "chat",
+  () => {
+    it(
+      "sends a message and receives a response",
+      async () => {
+        const ctx = createTestContext();
+        const caller = appRouter.createCaller(ctx);
+        await caller.universe.seed();
+        const result = await caller.chat.send({ message: "Qual é o seu papel no ecossistema NEXUS?" });
+        expect(result).toBeDefined();
+        expect(typeof result.response).toBe("string");
+        expect(result.response.length).toBeGreaterThan(0);
+      },
+      120000,
+    );
+
+    it(
+      "stores chat messages in memory",
+      async () => {
+        const ctx = createTestContext();
+        const caller = appRouter.createCaller(ctx);
+        await caller.chat.send({ message: "Mensagem de teste para verificação" });
+        const memory = await caller.memory.list();
+        const chatEntries = memory.filter(m => m.content.includes("[Chat]"));
+        expect(chatEntries.length).toBeGreaterThan(0);
+      },
+      120000,
+    );
+  },
+);
+
+describe("marketplace", () => {
+  it("lists published plugins", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const plugins = await caller.marketplace.list();
+    expect(plugins).toBeDefined();
+    expect(Array.isArray(plugins)).toBe(true);
+    expect(plugins.length).toBeGreaterThan(0);
+    expect(plugins[0]).toHaveProperty("name");
+    expect(plugins[0]).toHaveProperty("category");
+    expect(plugins[0]).toHaveProperty("description");
+  });
+
+  it("filters by query string", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const results = await caller.marketplace.list({ query: "Segurança" });
+    expect(results.some(p => p.name.includes("Segurança") || p.description.includes("Segurança"))).toBe(true);
+  });
+
+  it("publishes a plugin and it appears in the listing", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const before = (await caller.marketplace.list()).length;
+    const publishResult = await caller.marketplace.publish({
+      name: "Plugin de Teste Vitest",
+      category: "utility",
+      description: "Plugin de teste criado pelo suite de testes",
+      version: "0.1.0",
+    });
+    expect(publishResult.success).toBe(true);
+    const after = (await caller.marketplace.list()).length;
+    expect(after).toBeGreaterThan(before);
+
+    // Remove test plugin to keep DB clean
+    const listed = await caller.marketplace.list({ query: "Plugin de Teste Vitest" });
+    await caller.marketplace.remove({ pluginId: listed[0].id });
+  });
+
+  it("installs a marketplace plugin into user plugins", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const mp = await caller.marketplace.list();
+    const result = await caller.marketplace.install({ pluginId: mp[0].id });
+    expect(result.success).toBe(true);
+    // Verify it appears in the user's plugins
+    const userPlugins = await caller.plugins.list();
+    expect(userPlugins.some(p => p.name === mp[0].name)).toBe(true);
+  });
+
+  it("lists the current user's published plugins", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const mine = await caller.marketplace.listMine();
+    expect(Array.isArray(mine)).toBe(true);
+    // Test user seeded demo plugins in this session
+    expect(mine.length).toBeGreaterThan(0);
+    for (const p of mine) {
+      expect(p.authorId).toBe(1);
+    }
+  });
+
+  it("upvotes a plugin", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const mp = await caller.marketplace.list();
+    const before = mp[0].upvotes;
+    const result = await caller.marketplace.upvote({ pluginId: mp[0].id });
+    expect(result.success).toBe(true);
+    const after = await caller.marketplace.list();
+    const updated = after.find(p => p.id === mp[0].id);
+    expect(updated?.upvotes).toBe(before + 1);
+  });
+});

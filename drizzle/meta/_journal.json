@@ -36,6 +36,13 @@
       "when": 1786673820484,
       "tag": "0004_short_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786674747396,
+      "tag": "0005_narrow_korath",
+      "breakpoints": true
     }
   ]
 }

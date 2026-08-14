@@ -15,9 +15,14 @@ import {
   addValidatedTool,
   shareProject, getSharedProjects, getProjectShares, removeProjectShare, getUsersByIds,
   getScheduledMissions, updateMissionSchedule,
+  listMarketplacePlugins, getMarketplacePlugin, addMarketplacePlugin,
+  incrementMarketplaceDownloads, upvoteMarketplacePlugin, removeMarketplacePlugin, installMarketplacePlugin,
+  getMyMarketplacePlugins,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
+import { getDb } from "./db";
 
 export const appRouter = router({
   system: systemRouter,
@@ -333,6 +338,92 @@ export const appRouter = router({
     }),
   }),
 
+  chat: router({
+    send: protectedProcedure
+      .input(z.object({ message: z.string(), agent: z.string().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+
+        // Add to memory
+        await addMemory(userId, { content: `[Chat] ${input.message}`, origin: 'chat', tags: ['chat'] });
+        await addFeedEvent(userId, { eventType: 'mission', message: `[Chat] Mensagem recebida: ${input.message.slice(0, 80)}` });
+
+        // Build context from recent memory
+        const recentMemory = await getAllMemory(userId);
+        const contextMemories = recentMemory.slice(0, 5).map(m => m.content).join("\n");
+
+        // Determine system prompt based on selected agent
+        let systemPrompt = "Você é o NEXUS, uma plataforma cognitiva universal. Responda de forma concisa e útil em português. Use tom técnico mas acessível.";
+
+        if (input.agent && input.agent !== "all") {
+          const agents = await getAgents(userId);
+          const selectedAgent = agents.find(a => a.name === input.agent);
+          if (selectedAgent) {
+            systemPrompt = `Você é o agente NEXUS "${selectedAgent.name}" — especialista em ${selectedAgent.specialization || 'processamento cognitivo'}. Responda de forma concisa em português, focando na sua área de especialidade.`;
+          }
+        }
+
+        // Invoke LLM with context
+        const result = await invokeLLM({
+          model: 'gpt-5-mini',
+          messages: [
+            { role: 'system' as const, content: systemPrompt },
+            ...(contextMemories ? [{ role: 'user' as const, content: `Contexto recente do usuário:\n${contextMemories}` }] : []),
+            { role: 'user' as const, content: input.message },
+          ],
+        });
+
+        const responseText = typeof result.choices[0].message.content === 'string'
+          ? result.choices[0].message.content
+          : String(result.choices[0].message.content);
+
+        await addMemory(userId, { content: `[Chat] Resposta: ${responseText.slice(0, 200)}`, origin: 'chat', tags: ['chat', 'response'] });
+        await addFeedEvent(userId, { eventType: 'result', message: `[Chat] Resposta enviada` });
+
+        return { response: responseText };
+      }),
+  }),
+
+  analytics: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return { missionsByDay: [], avgConfidence: 0, agentsActivity: [] };
+
+      // Missions by day (last 7 days)
+      const missionsResult = await db.execute(sql`SELECT DATE(createdAt) as day, COUNT(*) as count FROM missions WHERE userId = ${ctx.user.id} AND createdAt >= DATE_SUB(NOW(), INTERVAL 7 DAY) GROUP BY day ORDER BY day ASC`);
+
+      // Average confidence from missions
+      const confResult = await db.execute(sql`SELECT AVG(confidence) as avgConf FROM missions WHERE userId = ${ctx.user.id} AND confidence IS NOT NULL`);
+
+      // Agent activity from feed events
+      const agentsResult = await db.execute(sql`SELECT agentName, COUNT(*) as count FROM cognitiveFeed WHERE userId = ${ctx.user.id} AND agentName IS NOT NULL GROUP BY agentName ORDER BY count DESC LIMIT 10`);
+
+      // Memory by tier
+      const memoryResult = await db.execute(sql`SELECT tier, COUNT(*) as count FROM memory WHERE userId = ${ctx.user.id} GROUP BY tier ORDER BY count DESC`);
+
+      // db.execute(sql`...`) returns [rows, fields] (mysql2 format)
+      const missionsRows = Array.isArray((missionsResult as any)[0])
+        ? (missionsResult as any)[0]
+        : [];
+      const confRows = Array.isArray((confResult as any)[0])
+        ? (confResult as any)[0]
+        : [];
+      const agentsRows = Array.isArray((agentsResult as any)[0])
+        ? (agentsResult as any)[0]
+        : [];
+      const memoryRows = Array.isArray((memoryResult as any)[0])
+        ? (memoryResult as any)[0]
+        : [];
+
+      const missionsByDay = missionsRows.filter((r: any) => r && r.day);
+      const avgConfidence = confRows?.[0]?.avgConf ?? 0;
+      const agentsActivity = agentsRows.filter((r: any) => r && r.agentName);
+      const memoryByTier = memoryRows.filter((r: any) => r && r.tier);
+
+      return { missionsByDay, avgConfidence, agentsActivity, memoryByTier };
+    }),
+  }),
+
   memory: router({
     getTier: protectedProcedure.input(z.object({ tier: z.enum(['ativa', 'relevante', 'historica', 'arquivada']) })).query(async ({ ctx, input }) => getMemoryByTier(ctx.user.id, input.tier)),
     list: protectedProcedure.query(async ({ ctx }) => getAllMemory(ctx.user.id)),
@@ -504,6 +595,52 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         }
       }),
   }),
-});
 
+  marketplace: router({
+    list: protectedProcedure
+      .input(z.object({ query: z.string().optional(), category: z.string().optional() }).optional())
+      .query(async ({ ctx, input }) => listMarketplacePlugins(input?.query, input?.category)),
+    details: protectedProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .query(async ({ ctx, input }) => getMarketplacePlugin(input.pluginId)),
+    publish: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1).max(128),
+        category: z.enum(["model", "infra", "device", "utility"]),
+        description: z.string().min(1).max(2000),
+        githubUrl: z.string().max(512).optional(),
+        sourceCode: z.string().optional(),
+        version: z.string().max(32).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await addMarketplacePlugin(ctx.user.id, input);
+        await addFeedEvent(ctx.user.id, {
+          eventType: "agent",
+          message: `[Marketplace] Plugin publicado: ${input.name}`,
+          agentName: "Sincronia",
+        });
+        return { success: true };
+      }),
+    upvote: protectedProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await upvoteMarketplacePlugin(input.pluginId);
+        return { success: true };
+      }),
+    install: protectedProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await incrementMarketplaceDownloads(input.pluginId);
+        await installMarketplacePlugin(ctx.user.id, input.pluginId);
+        return { success: true };
+      }),
+    remove: protectedProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await removeMarketplacePlugin(ctx.user.id, input.pluginId);
+        return { success: true };
+      }),
+    listMine: protectedProcedure.query(async ({ ctx }) => getMyMarketplacePlugins(ctx.user.id)),
+  }),
+});
 export type AppRouter = typeof appRouter;
