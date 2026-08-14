@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
-import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu } from "lucide-react";
+import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu, Terminal, Globe } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription
@@ -8,6 +8,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const QUICK_PROVIDERS = [
+  { value: "forge", label: "APIForge (padrão)" },
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Gemini" },
+  { value: "groq", label: "Groq" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "ollama", label: "Ollama (local)" },
+  { value: "qwen", label: "QwenCloud" },
+  { value: "custom", label: "Custom" },
+];
 
 interface LiveEvent {
   eventType: string;
@@ -16,6 +29,22 @@ interface LiveEvent {
   agentName?: string;
   createdAt?: Date;
   timestamp?: number;
+}
+
+/** Indicador das ferramentas de computador ativadas para o modo agente (Fase 14) */
+function ToolsStatus() {
+  const { data } = trpc.userLlm.get.useQuery(undefined, { staleTime: 30_000 });
+  if (!data) return null;
+  const parts: string[] = [];
+  if (data.shellEnabled === true) parts.push("TERMINAL");
+  if (data.webEnabled !== false) parts.push("WEB");
+  return (
+    <span className="text-[9px] font-mono text-[#ffd479] flex items-center gap-1">
+      {data.shellEnabled === true && <Terminal className="h-3 w-3" />}
+      {data.webEnabled !== false && !data.shellEnabled && <Globe className="h-3 w-3" />}
+      FERRAMENTAS: {parts.join(" + ") || "MEMÓRIA"}
+    </span>
+  );
 }
 
 interface AgentStep {
@@ -131,7 +160,12 @@ export default function MinhaIA() {
   const unscheduleMutation = trpc.missions.unschedule.useMutation();
   const { data: scheduledMissions, refetch: refetchScheduled } = trpc.missions.listScheduled.useQuery();
   const [input, setInput] = useState("");
+  const llmConfig = trpc.userLlm.get.useQuery();
   const [agentMode, setAgentMode] = useState(false);
+  const quickSetMutation = trpc.userLlm.update.useMutation({
+    onSuccess: () => { toast.success("Motor de IA atualizado — chave e endpoint em Config → Motor de IA."); llmConfig.refetch(); },
+    onError: (e: { message?: string } | Error | undefined) => toast.error(e instanceof Error ? e.message : "Falha ao atualizar"),
+  });
   const [agentMissionId, setAgentMissionId] = useState<number | null>(null);
   // Ref para transportar o missionId do modo agente até o onMutate do
   // executeMutation (criado no escopo do componente, antes de handleSubmit).
@@ -318,6 +352,21 @@ export default function MinhaIA() {
             </span>
             <span className="text-[9px] font-mono text-[#7684a0]">(loop autônomo NEXUS × Manus — console ao vivo)</span>
           </label>
+          <ToolsStatus />
+          <Select
+            value={quickSetMutation.variables?.provider ?? (llmConfig.data?.provider ?? "forge")}
+            onValueChange={(v) => quickSetMutation.mutate({ provider: v as "forge" | "openai" | "anthropic" | "google" | "groq" | "openrouter" | "ollama" | "qwen" | "custom" })}
+          >
+            <SelectTrigger className="h-6 w-44 text-[10px] font-mono border-[#7684a0]/30">
+              <Cpu className="h-3 w-3 mr-1 text-[#c9b8ff]" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              {QUICK_PROVIDERS.map((p) => (
+                <SelectItem key={p.value} value={p.value} className="text-xs font-mono">{p.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <form
           className="flex gap-3"

@@ -15,6 +15,11 @@
  */
 import { invokeLLM, type ToolCall, type Tool } from "./_core/llm";
 import { addMissionStep, addFeedEvent, updateMission, getMemoryByTier, addMemory, addInAppNotification, awardXp, fireMissionWebhooks, evaluateAchievements } from "./db";
+import {
+  runShell, readFile, writeFile, editFile, listDir, webFetch,
+  trackRead,
+} from "./nexus-computer-tools";
+import { invokeLLMWithProvider, type ProviderConfig } from "./nexus-multillm";
 
 const AGENTS = ["Sincronia", "Pesquisa", "Memória", "Código", "Planejamento", "Crítica", "Síntese", "Execução", "Comunicação"] as const;
 
@@ -71,6 +76,102 @@ const MEMORY_TOOLS: Tool[] = [
   {
     type: "function",
     function: {
+      name: "run_shell",
+      description: "Execute a shell command in the mission sandbox workspace. Only simple, safe commands (list files, run python/node scripts, grep, etc.). Dangerous system commands are blocked. Use relative paths for your workspace files.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "The bash command to run." },
+        },
+        required: ["command"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "Read a file inside the mission workspace. Use relative paths (e.g. 'notas.txt'). Supports offset/limit for large files.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative file path inside the workspace." },
+          offset: { type: "number", description: "First line to read (default 1)." },
+          limit: { type: "number", description: "Max lines to read (default 2000)." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description: "Create a new file or fully overwrite an existing file in the mission workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative file path inside the workspace." },
+          content: { type: "string", description: "Full file content." },
+        },
+        required: ["path", "content"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_file",
+      description: "Replace an exact string inside a file in the mission workspace. The old_string must be unique; read the file first.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative file path inside the workspace." },
+          old_string: { type: "string", description: "The exact text to replace." },
+          new_string: { type: "string", description: "The replacement text." },
+          replace_all: { type: "boolean", description: "Replace all occurrences." },
+        },
+        required: ["path", "old_string", "new_string"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_dir",
+      description: "List the contents of a directory inside the mission workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative directory path (use '.' for the workspace root)." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_fetch",
+      description: "Fetch a public URL and extract its text content.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The URL to fetch (http or https)." },
+        },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finish",
       description: "Synthesize all accumulated observations into the final mission result and end the loop.",
       parameters: {
@@ -112,13 +213,17 @@ export async function runAgentLoop(
   userId: number,
   missionId: number,
   missionInput: string,
-  opts: { maxIterations?: number } = {}
+  opts: { maxIterations?: number; provider?: ProviderConfig; enableComputerTools?: boolean; webEnabled?: boolean } = {}
 ): Promise<AgentLoopResult> {
   const maxIter = opts.maxIterations ?? MAX_ITERATIONS;
-  const model = "gpt-5-mini";
+  const provider: ProviderConfig = opts.provider ?? { provider: "forge" };
+  const callLLM = (params: Parameters<typeof invokeLLMWithProvider>[1]) => invokeLLMWithProvider(provider, params);
+  const computerEnabled = opts.enableComputerTools === true;
+  const webEnabled = opts.webEnabled !== false;
+  const model = provider.model || "gpt-5-mini";
 
   // --- Interpretation (same as classic pipeline) ---
-  const interpretation = await invokeLLM({
+  const interpretation = await callLLM({
     model,
     messages: [
       { role: "system", content: "You are NEXUS, an Intelligent Infrastructure. Interpret the mission, identify the goal, complexity and an initial plan. Return JSON." },
@@ -154,7 +259,7 @@ export async function runAgentLoop(
     {
       role: "system",
       content:
-        "You are the NEXUS autonomous agent (fusion mode). You execute missions by choosing tools each iteration. Available tools: search_memory, save_memory, ask_agent, finish. Choose ONE tool per response. The mission ends only with finish. If a previous tool call failed, acknowledge the error and adapt. Keep details concise.",
+        `You are the NEXUS autonomous agent (fusion mode). You execute missions by choosing tools each iteration. Available tools: search_memory, save_memory, ask_agent${computerEnabled ? ", run_shell, read_file, write_file, edit_file, list_dir" : ""}${webEnabled ? ", web_fetch" : ""}, finish. Choose ONE tool per response. The mission ends only with finish. If a previous tool call failed, acknowledge the error and adapt. Keep details concise. For computer tools use simple relative paths inside the workspace (e.g. 'dados.txt').`,
     },
     {
       role: "user",
@@ -245,7 +350,7 @@ export async function runAgentLoop(
       } else if (call.function.name === "ask_agent") {
         const agentName = AGENTS.includes(args.agent as (typeof AGENTS)[number]) ? args.agent : "Sincronia";
         const subtask = String(args.subtask ?? "").slice(0, 1500);
-        const agentResult = await invokeLLM({
+        const agentResult = await callLLM({
           model,
           messages: [
             { role: "system", content: `${AGENT_PROMPT[agentName] ?? AGENT_PROMPT.Sincronia} Return a concise, actionable result.` },
@@ -258,8 +363,45 @@ export async function runAgentLoop(
         contextWindow.push({ role: "assistant", content: "" });
         (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
         contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "run_shell" && computerEnabled) {
+        toolResultText = await runShell(userId, String(args.command ?? "").slice(0, 2000));
+        await persist(userId, missionId, "tool_result", "run_shell", undefined, toolResultText.slice(0, 500));
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "read_file" && computerEnabled) {
+        toolResultText = await readFile(userId, String(args.path ?? ""), { offset: Number(args.offset ?? 1), limit: Number(args.limit ?? 2000) });
+        trackRead(missionId, String(args.path ?? ""));
+        await persist(userId, missionId, "tool_result", "read_file", undefined, toolResultText.slice(0, 500));
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "write_file" && computerEnabled) {
+        toolResultText = await writeFile(userId, String(args.path ?? ""), String(args.content ?? ""));
+        await persist(userId, missionId, "tool_result", "write_file", undefined, toolResultText);
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText, tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "edit_file" && computerEnabled) {
+        toolResultText = await editFile(userId, missionId, String(args.path ?? ""), String(args.old_string ?? ""), String(args.new_string ?? ""), Boolean(args.replace_all));
+        await persist(userId, missionId, "tool_result", "edit_file", undefined, toolResultText);
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText, tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "list_dir" && computerEnabled) {
+        toolResultText = await listDir(userId, String(args.path ?? "."));
+        await persist(userId, missionId, "tool_result", "list_dir", undefined, toolResultText.slice(0, 500));
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "web_fetch" && webEnabled) {
+        toolResultText = await webFetch(String(args.url ?? ""));
+        await persist(userId, missionId, "tool_result", "web_fetch", undefined, toolResultText.slice(0, 500));
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
       } else {
-        toolResultText = `Ferramenta desconhecida: ${call.function.name}`;
+        toolResultText = `Ferramenta desconhecida ou desativada: ${call.function.name}`;
         contextWindow.push({ role: "assistant", content: "" });
         (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
         contextWindow.push({ role: "tool", content: toolResultText, tool_call_id: call.id } as CtxMsg);
@@ -294,6 +436,19 @@ export async function runAgentLoop(
 
   const confRounded = Number(confidence.toFixed(3));
   await addMemory(userId, { content: `Missão (modo agente): ${missionInput}\nResultado: ${result.slice(0, 1200)}`, confidence: confRounded, origin: "mission", tags: ["mission", "result", "agent-loop"] });
+  // Super Memória (Fase 14b): descobertas do agente viram notas permanentes estilo Obsidian
+  try {
+    const { addSuperNote } = await import("./db");
+    await addSuperNote({
+      userId,
+      title: `Missão: ${interp.interpretedGoal.slice(0, 80)}`,
+      content: `# ${interp.interpretedGoal}\n\n**Missão:** ${missionInput}\n\n**Resultado (confiança ${Math.round(confRounded * 100)}%):**\n\n${result.slice(0, 4000)}\n\n---\n_Gerada automaticamente pelo loop do agente — NEXUS._`,
+      folder: "Missões",
+      tags: JSON.stringify(["missão", "agente", "resultado"]),
+      source: "agent",
+      missionId,
+    });
+  } catch { /* never block mission */ }
   await updateMission(userId, missionId, { status: "completed", result, confidence: confRounded, completedAt: new Date() });
   await persist(userId, missionId, "complete", undefined, "Síntese", `Missão concluída — confiança: ${Math.round(confRounded * 100)}%`, confRounded);
 
