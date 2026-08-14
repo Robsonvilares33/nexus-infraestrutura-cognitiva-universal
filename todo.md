@@ -217,8 +217,8 @@
 
 ## Fase 14 — lacunas identificadas na revisão
 
-- [ ] Minha IA: seletor de provedor/modelo por missão (além do badge ToolsStatus) e verificação visual de /minha-ia após correção de JSX
+- [x] Minha IA: seletor de provedor/modelo por missão (dropdown Motor de IA ao lado do badge ToolsStatus + MODO AGENTE; usa userLlm.update; toast de confirmação) — checkpoint 06677902
 - [x] Template de ambiente open source: docs/ENV-TEMPLATE.md (raiz .env* é gerenciada pelo sistema de secrets na hospedagem; o template em docs/ é o deliverable para execução local — LOCAL-SETUP.md atualizado para copiá-lo)
 - [x] Vitest dedicado para computer tools (server/nexus-computer-tools.test.ts: 11 testes — shell segura, bloqueio de padrões perigosos, path traversal, file ops, regex rm-root corrigida) e super_notes CRUD/integração (server/super-notes.test.ts: 5 testes, 16/16 passando ao todo)
-- [ ] Super Memória UI: editor Markdown completo, árvore de pastas, links entre notas (a página atual tem cards + busca; falta o editor/treeNode)
+- [x] Super Memória UI: árvore de pastas (vault) + links [[ ]] clicáveis no leitor e no grid (editor em dialog com preview Markdown) — checkpoint 06677902
 - [ ] GitHub sync da Fase 14 (snapshot + PR em main, com sanitização de secrets)

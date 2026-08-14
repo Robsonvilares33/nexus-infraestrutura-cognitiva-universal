@@ -8,6 +8,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const QUICK_PROVIDERS = [
+  { value: "forge", label: "APIForge (padrão)" },
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Gemini" },
+  { value: "groq", label: "Groq" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "ollama", label: "Ollama (local)" },
+  { value: "qwen", label: "QwenCloud" },
+  { value: "custom", label: "Custom" },
+];
 
 interface LiveEvent {
   eventType: string;
@@ -149,6 +162,10 @@ export default function MinhaIA() {
   const [input, setInput] = useState("");
   const llmConfig = trpc.userLlm.get.useQuery();
   const [agentMode, setAgentMode] = useState(false);
+  const quickSetMutation = trpc.userLlm.update.useMutation({
+    onSuccess: () => { toast.success("Motor de IA atualizado — chave e endpoint em Config → Motor de IA."); llmConfig.refetch(); },
+    onError: (e: { message?: string } | Error | undefined) => toast.error(e instanceof Error ? e.message : "Falha ao atualizar"),
+  });
   const [agentMissionId, setAgentMissionId] = useState<number | null>(null);
   // Ref para transportar o missionId do modo agente até o onMutate do
   // executeMutation (criado no escopo do componente, antes de handleSubmit).
@@ -336,6 +353,20 @@ export default function MinhaIA() {
             <span className="text-[9px] font-mono text-[#7684a0]">(loop autônomo NEXUS × Manus — console ao vivo)</span>
           </label>
           <ToolsStatus />
+          <Select
+            value={quickSetMutation.variables?.provider ?? (llmConfig.data?.provider ?? "forge")}
+            onValueChange={(v) => quickSetMutation.mutate({ provider: v as "forge" | "openai" | "anthropic" | "google" | "groq" | "openrouter" | "ollama" | "qwen" | "custom" })}
+          >
+            <SelectTrigger className="h-6 w-44 text-[10px] font-mono border-[#7684a0]/30">
+              <Cpu className="h-3 w-3 mr-1 text-[#c9b8ff]" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              {QUICK_PROVIDERS.map((p) => (
+                <SelectItem key={p.value} value={p.value} className="text-xs font-mono">{p.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <form
           className="flex gap-3"
