@@ -155,10 +155,17 @@
 - [x] Vitest coverage (50/50 tests passing) + screenshots + checkpoint eee9251a + GitHub sync
 
 ## Phase 11 — Reputação de Perfil, Notificações em Tempo Real, Templates de Missão
-- [ ] Sistema de níveis de reputação (XP thresholds -> badges: Iniciante, Explorador, Arquiteto, Mago, Lenda) em db.ts + helper
-- [ ] Socket.io: broadcast in-app notification events (notificação:push) no createInAppNotification
-- [ ] Templates de missão: tabela mission_templates (título, descrição, inputSugerido, agentes, categoria) + seed + roteador marketplace.publishTemplate/listTemplates/useTemplate
-- [ ] Frontend: nível de reputação no Perfil e sidebar (barra XP + próximo nível)
-- [ ] Frontend: notificações push ao vivo sem recarregar (socket listener na página Notificações)
-- [ ] Frontend: aba Templates no Marketplace com botão "Usar template" que preenche Minha IA
-- [ ] Vitest coverage (nível de reputação + templates + socket) + screenshots + checkpoint + GitHub sync
+- [x] Sistema de níveis de reputação (XP thresholds -> badges: Iniciante, Explorador, Arquiteto, Mago, Lenda) em db.ts + helper
+- [x] Socket.io: broadcast in-app notification events (notificação:push) no createInAppNotification
+- [x] Templates de missão: tabela mission_templates (título, descrição, inputSugerido, agentes, categoria) + seed + roteador marketplace.publishTemplate/listTemplates/useTemplate
+- [x] Frontend: nível de reputação no Perfil e sidebar (barra XP + próximo nível)
+- [x] Frontend: notificações push ao vivo sem recarregar (socket listener na página Notificações)
+- [x] Frontend: aba Templates no Marketplace com botão "Usar template" que preenche Minha IA
+- [x] Vitest coverage (nível de reputação + templates + socket) + screenshots + checkpoint + GitHub sync
+- [x] Limpeza de dados de teste vitest (plugins, notificações, xp_events, threads, reviews, colaborações, projetos, missões)
+- [x] README.md atualizado com Reputação, Notificações em tempo real, Templates de Missão e Indicador de conexão
+
+## Phase 12 (sugestões futuras)
+- [ ] Streaming real do feed cognitivo para execução de missões agendadas
+- [ ] Busca semântica vetorial (embeddings) na Memória
+- [ ] Compartilhamento de missões entre usuários (exportar/importar)

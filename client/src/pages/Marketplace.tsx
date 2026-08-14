@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function Marketplace() {
+  const [, navigate] = useLocation();
   const [query, setQuery] = useState("");
   const [semantic, setSemantic] = useState(false);
   const [category, setCategory] = useState("all");
@@ -321,15 +323,18 @@ export default function Marketplace() {
                 <p className="text-[10px] font-mono text-[#7684a0] line-clamp-2">{t.description}</p>
                 <Button
                   size="sm"
-                  onClick={() => createMissionMutation.mutate({ input: t.suggestedInput })}
-                  disabled={createMissionMutation.isPending}
+                  onClick={() => {
+                    // Phase 11: prefill Minha IA mission input instead of executing immediately
+                    try {
+                      localStorage.setItem("nexus-template-input", t.suggestedInput);
+                    } catch {
+                      /* storage unavailable */
+                    }
+                    navigate("/minha-ia");
+                  }}
                   className="mt-auto bg-[#ffd479]/10 text-[#ffd479] border border-[#ffd479]/20 hover:bg-[#ffd479]/20 font-mono text-[10px] self-start"
                 >
-                  {createMissionMutation.isPending ? (
-                    <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                  ) : (
-                    <Zap className="h-3 w-3 mr-1.5" />
-                  )}
+                  <Zap className="h-3 w-3 mr-1.5" />
                   USAR TEMPLATE
                 </Button>
               </div>
