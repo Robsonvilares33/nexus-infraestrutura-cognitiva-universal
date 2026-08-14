@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
-import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash } from "lucide-react";
+import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription
@@ -18,6 +18,93 @@ interface LiveEvent {
   timestamp?: number;
 }
 
+interface AgentStep {
+  id: number;
+  stepType: string;
+  toolName: string | null;
+  agentName: string | null;
+  detail: string | null;
+  createdAt: Date;
+}
+
+/** Hook do console do agente — SSE (/api/missions/stream/:id) com fallback de polling */
+function useAgentStream(missionId: number | null, enabled: boolean) {
+  const [steps, setSteps] = useState<AgentStep[]>([]);
+  const [missionStatus, setMissionStatus] = useState<string | null>(null);
+  const [missionConfidence, setMissionConfidence] = useState<number | null>(null);
+  const [streamError, setStreamError] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const stepsRef = useRef<AgentStep[]>([]);
+  const utils = trpc.useUtils();
+
+  useEffect(() => {
+    if (!enabled || missionId === null) { setSteps([]); setMissionStatus(null); setIsExecuting(false); return; }
+    setIsExecuting(true);
+    stepsRef.current = [];
+    setSteps([]);
+    setStreamError(false);
+    let es: EventSource | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let closed = false;
+    let fallbackActive = false;
+
+    const applyStep = (s: AgentStep) => {
+      if (s.id > (stepsRef.current[stepsRef.current.length - 1]?.id ?? 0)) {
+        stepsRef.current.push(s);
+        setSteps([...stepsRef.current]);
+      }
+    };
+
+    const refresh = async () => {
+      try {
+        const rows = await utils.missions.getSteps.fetch({ missionId });
+        rows.forEach(r => applyStep({ ...r, createdAt: new Date(r.createdAt as any) }));
+        const mission = await utils.missions.get.fetch({ missionId });
+        setMissionStatus(mission?.status ?? null);
+        setMissionConfidence(mission?.confidence != null ? Number(mission.confidence) : null);
+        if (mission?.status !== "executing") { setIsExecuting(false); cleanup(); }
+      } catch { setStreamError(true); }
+    };
+
+    const cleanup = () => {
+      closed = true;
+      es?.close();
+      if (interval) clearInterval(interval);
+    };
+
+    try {
+      es = new EventSource(`${window.location.origin}/api/missions/stream/${missionId}`);
+      es.onmessage = async () => { await refresh(); };
+      es.onerror = () => {
+        es?.close();
+        fallbackActive = true;
+      };
+      // Polling de fallback: SSE falhou ou desligado no ambiente
+      interval = setInterval(refresh, 2000);
+      refresh();
+    } catch {
+      fallbackActive = true;
+      interval = setInterval(refresh, 2000);
+      refresh();
+    }
+
+    return cleanup;
+  }, [missionId, enabled, utils]);
+
+  return { steps, missionStatus, missionConfidence, streamError, isExecuting };
+}
+
+const STEP_LABEL: Record<string, { icon: string; label: string; color: string }> = {
+  plan: { icon: "◆", label: "PLANO", color: "#ffd479" },
+  thought: { icon: "💭", label: "PENSAMENTO", color: "#aab4d6" },
+  tool_call: { icon: "⚙", label: "FERRAMENTA", color: "#7cf3ff" },
+  tool_result: { icon: "✓", label: "RESULTADO", color: "#3fe7b0" },
+  agent_result: { icon: "🤖", label: "AGENTE", color: "#c9b8ff" },
+  tool_error: { icon: "⚠", label: "ERRO", color: "#ff6b6b" },
+  complete: { icon: "🏁", label: "CONCLUSÃO", color: "#3fe7b0" },
+  error: { icon: "✕", label: "FALHA", color: "#ff6b6b" },
+};
+
 export default function MinhaIA() {
   const { data: missions, refetch: refetchMissions } = trpc.missions.list.useQuery();
   const { data: feed } = trpc.feed.list.useQuery({ limit: 50 });
@@ -27,6 +114,9 @@ export default function MinhaIA() {
   const unscheduleMutation = trpc.missions.unschedule.useMutation();
   const { data: scheduledMissions, refetch: refetchScheduled } = trpc.missions.listScheduled.useQuery();
   const [input, setInput] = useState("");
+  const [agentMode, setAgentMode] = useState(false);
+  const [agentMissionId, setAgentMissionId] = useState<number | null>(null);
+  const agentStream = useAgentStream(agentMissionId, agentMode);
   const [hookMissionId, setHookMissionId] = useState<number | null>(null);
   const [hookUrl, setHookUrl] = useState("");
   const { data: webhooks, refetch: refetchWebhooks } = trpc.webhooks.list.useQuery(
@@ -117,7 +207,24 @@ export default function MinhaIA() {
       message: `Missão recebida: ${input.trim()}`,
       createdAt: new Date(),
     }]);
-    await executeMutation.mutateAsync({ missionId: mid, input: input.trim() });
+    if (agentMode) {
+      // Fase 13 — Modo Agente: loop autônomo com console ao vivo
+      setAgentMissionId(mid);
+      executeMutation
+        .mutateAsync({ missionId: mid, input: input.trim(), mode: "agent" })
+        .then(res => {
+          if ((res as any)?.result) {
+            toast.success(`Missão concluída no Modo Agente — confiança ${Math.round((res as any).confidence * 100)}%`);
+          }
+        })
+        .catch(e => toast.error(`Falha no Modo Agente: ${e?.message || String(e)}`))
+        .finally(() => {
+          setAgentMissionId(null);
+          refetchMissions();
+        });
+    } else {
+      await executeMutation.mutateAsync({ missionId: mid, input: input.trim() });
+    }
     setInput("");
     refetchMissions();
   };
@@ -186,6 +293,20 @@ export default function MinhaIA() {
           <Zap className="h-4 w-4 text-[#7cf3ff]" />
           <span className="text-xs font-mono text-[#7684a0] tracking-wider">ENTREGAR MISSÃO</span>
         </div>
+        <div className="flex items-center gap-2 mb-3">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={agentMode}
+              onChange={e => setAgentMode(e.target.checked)}
+              className="accent-[#c9b8ff] h-3 w-3"
+            />
+            <span className="text-[10px] font-mono tracking-wider text-[#c9b8ff] flex items-center gap-1">
+              <Cpu className="h-3 w-3" /> MODO AGENTE
+            </span>
+            <span className="text-[9px] font-mono text-[#7684a0]">(loop autônomo NEXUS × Manus — console ao vivo)</span>
+          </label>
+        </div>
         <div className="flex gap-3">
           <input
             type="text"
@@ -205,6 +326,47 @@ export default function MinhaIA() {
           </button>
         </div>
       </div>
+
+      {/* Fase 13 — Console do Agente (streaming SSE + fallback polling) */}
+      {agentMissionId !== null && (
+        <div className="nexus-card p-4 border-[#c9b8ff]/30">
+          <div className="flex items-center gap-2 mb-3">
+            <Cpu className="h-4 w-4 text-[#c9b8ff]" />
+            <span className="text-xs font-mono text-[#7684a0] tracking-wider">CONSOLE DO AGENTE</span>
+            {agentStream.isExecuting && <span className="nexus-chip nexus-chip-pending animate-pulse">● LOOP ATIVO</span>}
+            {agentStream.missionStatus && agentStream.missionStatus !== "executing" && (
+              <span className={`nexus-chip ${agentStream.missionStatus === "completed" ? "nexus-chip-online" : "nexus-chip-offline"}`}>
+                {agentStream.missionStatus.toUpperCase()}
+              </span>
+            )}
+            {agentStream.missionConfidence !== null && (
+              <span className="text-[8px] font-mono text-[#3fe7b0] ml-auto">
+                CONFIANÇA {Math.round(agentStream.missionConfidence * 100)}%
+              </span>
+            )}
+            {agentStream.steps.length > 0 && (
+              <span className="nexus-chip nexus-chip-online">{agentStream.steps.length} passos</span>
+            )}
+          </div>
+          <div className="h-56 overflow-y-auto space-y-1 pr-2 scroll-smooth font-mono">
+            {agentStream.steps.length > 0 ? agentStream.steps.map(s => {
+              const meta = STEP_LABEL[s.stepType] ?? { icon: "•", label: s.stepType.toUpperCase(), color: "#7684a0" };
+              return (
+                <div key={s.id} className="flex items-start gap-2 px-2 py-1 rounded border border-[rgba(150,175,220,0.06)] bg-[rgba(3,5,14,0.5)]">
+                  <span className="text-[9px] shrink-0 w-5 text-center" style={{ color: meta.color }}>{meta.icon}</span>
+                  <span className="text-[8px] font-mono uppercase tracking-wider w-24 shrink-0 pt-0.5" style={{ color: meta.color }}>{meta.label}{s.toolName ? `:${s.toolName}` : ""}{s.agentName ? `·${s.agentName}` : ""}</span>
+                  <span className="flex-1 text-[10px] text-[#aab4d6] break-words whitespace-pre-wrap">{s.detail}</span>
+                  <span className="text-[8px] text-[#7684a0] shrink-0">{new Date(s.createdAt).toLocaleTimeString()}</span>
+                </div>
+              );
+            }) : (
+              <p className="text-[10px] font-mono text-[#7684a0] text-center py-8">
+                Iniciando o loop autônomo… os passos do agente aparecerão aqui em tempo real.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Cognitive Feed */}
       <div className="nexus-card p-4">

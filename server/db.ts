@@ -6,7 +6,7 @@ import {
   suggestedCategories,
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
-  pluginThreads, xpEvents, missionTemplates,
+  pluginThreads, xpEvents, missionTemplates, missionSteps,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -268,7 +268,8 @@ export async function createProject(userId: number, data: { name: string; descri
   const db = await getDb();
   if (!db) return null;
   const result = await db.insert(projects).values({ userId, ...data });
-  return result;
+  const header = Array.isArray(result) ? result[0] : result;
+  return { insertId: Number(header?.insertId ?? 0) };
 }
 export async function updateProject(userId: number, projectId: number, data: { name?: string; description?: string; status?: string }) {
   const db = await getDb();
@@ -303,7 +304,10 @@ export async function createMission(userId: number, data: { input: string; proje
   const db = await getDb();
   if (!db) return null;
   const result = await db.insert(missions).values({ userId, ...data, status: 'pending' });
-  return result;
+  // Normalize: raw mysql2 result is a tuple [ResultSetHeader, FieldPacket[]];
+  // superjson truncates nested fields, so expose insertId as a plain top-level number.
+  const header = Array.isArray(result) ? result[0] : result;
+  return { insertId: Number(header?.insertId ?? 0) };
 }
 export async function updateMission(userId: number, missionId: number, data: { status?: string; result?: string; resultType?: string; confidence?: number; startedAt?: Date; completedAt?: Date }) {
   const db = await getDb();
@@ -316,6 +320,23 @@ export async function updateMission(userId: number, missionId: number, data: { s
   if (data.startedAt !== undefined) setObj.startedAt = data.startedAt;
   if (data.completedAt !== undefined) setObj.completedAt = data.completedAt;
   return db.update(missions).set(setObj).where(and(eq(missions.userId, userId), eq(missions.id, missionId)));
+}
+
+// Phase 13: mission agent-loop steps (Manus-style think-act-observe history)
+export async function addMissionStep(missionId: number, data: { stepType: string; toolName?: string; agentName?: string; detail?: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.insert(missionSteps).values({ missionId, stepType: data.stepType, toolName: data.toolName || null, agentName: data.agentName || null, detail: data.detail || null });
+}
+export async function getMissionSteps(missionId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(missionSteps).where(eq(missionSteps.missionId, missionId)).orderBy(asc(missionSteps.id));
+}
+export async function deleteMissionSteps(missionId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.delete(missionSteps).where(eq(missionSteps.missionId, missionId));
 }
 
 // Memory

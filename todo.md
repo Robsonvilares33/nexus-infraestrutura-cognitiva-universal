@@ -182,4 +182,14 @@
 - [x] Teste de estresse como usuário: marketplace, templates, threads, XP
 - [x] Teste de estresse como usuário: projetos/colaboração, notificações, conquistas, admin
 - [x] Bug corrigidos na auditoria: DataTooLong (confidence arredondado) + missões travadas (try/catch → status=failed) + unificação de identidade (3 contas → 1020001)
-- [ ] Relatório de avaliação + guia de uso + possibilidades
+- [x] Relatório de avaliação + guia de uso + possibilidades (relatorio-auditoria-nexus.md entregue)
+
+## Fase 13: Fusão NEXUS + Manus (arquitetura fundida)
+- [ ] Analisar arquitetura interna do Manus (agente loop, ferramentas, streaming, contexto) e mapear conceitos fundíveis
+- [ ] Backend: executor agente em loop iterativo com subtarefas dinâmicas acionáveis
+- [ ] Backend: planejamento adaptativo (replaneja quando subtarefa falha ou missão muda)
+- [ ] Backend: memória de contexto persistente entre etapas da missão (context window compacta)
+- [ ] Backend: streaming real de eventos (SSE/WebSocket) substituindo polling síncrono
+- [ ] Frontend: console de agente com stream ao vivo, ferramentas acionáveis e progresso iterativo
+- [ ] Teste de estresse da arquitetura fundida
+- [ ] Sincronizar GitHub
