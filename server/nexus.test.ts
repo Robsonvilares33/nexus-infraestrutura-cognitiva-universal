@@ -418,3 +418,67 @@ describe("webhooks", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("categories", () => {
+  it("suggests and lists approved categories", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const uniqueName = `cat-test-${Date.now()}`;
+    await caller.categories.suggest({ name: uniqueName });
+    const approved = await caller.categories.listApproved();
+    // newly suggested categories are pending, not yet approved
+    expect(Array.isArray(approved)).toBe(true);
+    expect(approved.every((c: any) => c.isApproved)).toBe(true);
+    const pending = await caller.categories.listPending();
+    expect(Array.isArray(pending)).toBe(true);
+    expect(pending.some((c: any) => c.name === uniqueName)).toBe(true);
+  });
+
+  it("prevents duplicate category suggestions", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const uniqueName = `cat-dup-${Date.now()}`;
+    await caller.categories.suggest({ name: uniqueName });
+    await expect(caller.categories.suggest({ name: uniqueName.toUpperCase() })).rejects.toThrow();
+  });
+
+  it("votes on a suggested category", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const uniqueName = `cat-vote-${Date.now()}`;
+    await caller.categories.suggest({ name: uniqueName });
+    const pending = await caller.categories.listPending();
+    const cat = pending.find((c: any) => c.name === uniqueName);
+    expect(cat).toBeTruthy();
+    await caller.categories.vote({ categoryId: cat!.id });
+    const after = await caller.categories.listPending();
+    const updated = after.find((c: any) => c.id === cat!.id);
+    expect(updated!.upvotes).toBeGreaterThan(0);
+  });
+
+  it("rejects non-admin access to admin category endpoints", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.admin.listCategories()).rejects.toThrow();
+    await expect(caller.admin.approveCategory({ categoryId: 99999, isApproved: true })).rejects.toThrow();
+  });
+});
+
+describe("admin growth", () => {
+  it("returns weekly growth shape", async () => {
+    // promote test user to admin within the test for this call
+    const ctx = createTestContext({
+      user: { ...(createTestContext().user as any), role: "admin" },
+    });
+    const caller = appRouter.createCaller(ctx);
+    const growth = await caller.admin.growth();
+    expect(Array.isArray(growth.weeks)).toBe(true);
+    if (growth.weeks.length > 0) {
+      const w = growth.weeks[0];
+      expect(typeof w.week).toBe("string");
+      expect(typeof w.newUsers).toBe("number");
+      expect(typeof w.newMissions).toBe("number");
+      expect(typeof w.newPlugins).toBe("number");
+    }
+  });
+});

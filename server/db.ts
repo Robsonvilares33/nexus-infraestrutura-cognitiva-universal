@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
   projectShares, marketplacePlugins, marketplaceReviews, marketplaceInstalls,
+  suggestedCategories,
   userProfiles, missionWebhooks,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
@@ -808,4 +809,105 @@ export async function searchMarketplacePluginsByTerms(terms: string[], limit = 2
     .where(sql`(${sql.join(conditions, sql` OR `)}) AND ${marketplacePlugins.isApproved} = 1`)
     .orderBy(desc(marketplacePlugins.downloads), desc(marketplacePlugins.upvotes))
     .limit(limit);
+}
+
+// ---------- Community-suggested categories ----------
+export const BASE_CATEGORIES = ["model", "infra", "device", "utility"] as const;
+
+export async function addSuggestedCategory(userId: number, name: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  // Dedupe: same name (case-insensitive) pending or approved
+  const existing = await db.select().from(suggestedCategories)
+    .where(sql`LOWER(${suggestedCategories.name}) = ${name.toLowerCase()}`)
+    .limit(1);
+  if (existing.length > 0) throw new Error("Categoria já sugerida ou existente");
+  return db.insert(suggestedCategories).values({ name, suggestedByUserId: userId });
+}
+
+export async function voteSuggestedCategory(categoryId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  return db.update(suggestedCategories)
+    .set({ upvotes: sql`${suggestedCategories.upvotes} + 1` })
+    .where(eq(suggestedCategories.id, categoryId));
+}
+
+export async function listSuggestedCategories(approvedOnly = false) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(suggestedCategories)
+    .where(approvedOnly ? eq(suggestedCategories.isApproved, true) : undefined)
+    .orderBy(desc(suggestedCategories.isApproved), desc(suggestedCategories.upvotes));
+}
+
+export async function approveSuggestedCategory(categoryId: number, isApproved: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  return db.update(suggestedCategories).set({ isApproved }).where(eq(suggestedCategories.id, categoryId));
+}
+
+export async function deleteSuggestedCategory(categoryId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  return db.delete(suggestedCategories).where(eq(suggestedCategories.id, categoryId));
+}
+
+// ---------- Growth dashboard (weekly evolution) ----------
+export async function getWeeklyGrowthStats(weeks = 8) {
+  const db = await getDb();
+  if (!db) return { weeks: [] as { week: string; newUsers: number; newMissions: number; newPlugins: number }[] };
+  const run = async (q: any): Promise<any[]> => {
+    const result = await db.execute(q);
+    return Array.isArray(result) ? (result[0] as unknown as any[]) : [result];
+  };
+  // MySQL 8+: generate past N week labels
+  const weekRows = await run(sql`
+    SELECT DATE_FORMAT(DATE_SUB(DATE(NOW()), INTERVAL seq WEEK), '%Y-%m-%d') AS weekStart
+    FROM (SELECT 0 AS seq UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 UNION SELECT 10 UNION SELECT 11) t
+    WHERE seq < ${weeks}
+    ORDER BY weekStart
+  `);
+  const weeksList = (weekRows as any[]).map((r: any) => r.weekStart);
+  if (weeksList.length === 0) return { weeks: [] };
+  const firstWeek = weeksList[0];
+  const stats = await Promise.all([
+    run(sql`SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') AS d, COUNT(*) AS n FROM ${users} WHERE createdAt >= ${firstWeek} GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d')`),
+    run(sql`SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') AS d, COUNT(*) AS n FROM ${missions} WHERE createdAt >= ${firstWeek} GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d')`),
+    run(sql`SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') AS d, COUNT(*) AS n FROM ${marketplacePlugins} WHERE createdAt >= ${firstWeek} GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d')`),
+  ]);
+  const byDay = (rows: any[]) => {
+    const map = new Map<string, number>();
+    (rows as any[]).forEach(r => map.set(String(r.d), Number(r.n) || 0));
+    return map;
+  };
+  const userMap = byDay(stats[0]);
+  const missionMap = byDay(stats[1]);
+  const pluginMap = byDay(stats[2]);
+
+  // Bucket days into weeks aligned with weeksList
+  const out = weeksList.map(weekStart => {
+    const end = new Date(weekStart);
+    end.setDate(end.getDate() + 6);
+    const endStr = end.toISOString().slice(0, 10);
+    let newUsers = 0, newMissions = 0, newPlugins = 0;
+    const cur = new Date(weekStart);
+    while (cur <= end) {
+      const key = cur.toISOString().slice(0, 10);
+      newUsers += userMap.get(key) || 0;
+      newMissions += missionMap.get(key) || 0;
+      newPlugins += pluginMap.get(key) || 0;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return { week: endStr, newUsers, newMissions, newPlugins };
+  });
+  return { weeks: out };
+}
+
+// Lookup user by id with email (for notification targets)
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return rows.length > 0 ? rows[0] : null;
 }

@@ -24,6 +24,8 @@ import {
   getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
   addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks,
   searchMarketplacePluginsByTerms,
+  addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
+  getWeeklyGrowthStats, getUserById,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -706,6 +708,21 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
       }))
       .mutation(async ({ ctx, input }) => {
         await addMarketplaceReview(ctx.user.id, input.pluginId, input.rating, input.comment || "");
+        // Notify the plugin author (delivered to project owner, since the platform
+        // notification channel targets the owner) about the new review
+        try {
+          const plugin = await getMarketplacePlugin(input.pluginId);
+          const author = plugin?.authorId ? await getUserById(plugin.authorId) : null;
+          if (author) {
+            const { notifyOwner } = await import("./_core/notification");
+            await notifyOwner({
+              title: `[NEXUS] Nova avaliação no seu plugin`,
+              content: `Seu plugin "${String(plugin?.name ?? "")}" recebeu uma avaliação de ${input.rating} estrela${input.rating > 1 ? "s" : ""} de ${ctx.user.name || "um usuário"}.${input.comment ? ` Comentário: ${input.comment.slice(0, 200)}` : ""}`,
+            }).catch(() => {});
+          }
+        } catch {
+          // Notification is optional, don't fail the review
+        }
         return { success: true };
       }),
     reviews: protectedProcedure
@@ -735,6 +752,20 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         await deleteAnyMarketplacePlugin(input.pluginId);
         return { success: true };
       }),
+    listCategories: adminProcedure.query(async () => listSuggestedCategories(false)),
+    approveCategory: adminProcedure
+      .input(z.object({ categoryId: z.number(), isApproved: z.boolean() }))
+      .mutation(async ({ input }) => {
+        await approveSuggestedCategory(input.categoryId, input.isApproved);
+        return { success: true };
+      }),
+    deleteCategory: adminProcedure
+      .input(z.object({ categoryId: z.number() }))
+      .mutation(async ({ input }) => {
+        await deleteSuggestedCategory(input.categoryId);
+        return { success: true };
+      }),
+    growth: adminProcedure.query(async () => getWeeklyGrowthStats(8)),
   }),
 
   profile: router({
@@ -789,6 +820,27 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         await removeMissionWebhook(input.webhookId, ctx.user.id);
         return { success: true };
       }),
+  }),
+
+  categories: router({
+    // All users see approved community categories alongside the base ones
+    listApproved: protectedProcedure.query(async () => listSuggestedCategories(true)),
+    suggest: protectedProcedure
+      .input(z.object({ name: z.string().min(2).max(64) }))
+      .mutation(async ({ ctx, input }) => {
+        await addSuggestedCategory(ctx.user.id, input.name.trim());
+        return { success: true };
+      }),
+    vote: protectedProcedure
+      .input(z.object({ categoryId: z.number() }))
+      .mutation(async ({ input }) => {
+        await voteSuggestedCategory(input.categoryId);
+        return { success: true };
+      }),
+    listPending: protectedProcedure.query(async () => {
+      const cats = await listSuggestedCategories(false);
+      return cats.filter(c => !c.isApproved);
+    }),
   }),
 });
 export type AppRouter = typeof appRouter;
