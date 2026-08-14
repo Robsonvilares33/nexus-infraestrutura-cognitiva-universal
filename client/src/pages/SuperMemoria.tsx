@@ -148,23 +148,50 @@ export default function SuperMemoria() {
         Sua memória permanente e ilimitada. Tudo que você anotar — e tudo que o agente descobrir nas missões — fica salvo aqui para sempre, organizado em pastas, tags e links entre notas.
       </p>
 
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="relative flex-1 min-w-56">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Buscar na memória..." value={query} onChange={(e) => setQuery(e.target.value)} />
-        </div>
-        <Select value={selectedFolder} onValueChange={(v) => { setSelectedFolder(v); setQuery(""); setSelectedNote(null); }}>
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Todas">Todas as pastas</SelectItem>
-            {(folders ?? []).map((f) => (
-              <SelectItem key={f} value={f}>{f}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
+      <div className="flex items-start gap-5 mb-6">
+        {/* Árvore de pastas — estilo vault Obsidian */}
+        <aside className="nexus-card p-3 w-60 shrink-0 hidden md:block">
+          <div className="flex items-center gap-2 mb-2 text-[10px] font-mono tracking-wider text-[#7684a0] uppercase">
+            <FolderOpen className="h-3 w-3" /> Vault
+          </div>
+          <button
+            type="button"
+            className={`w-full text-left text-sm px-2 py-1.5 rounded flex items-center justify-between ${selectedFolder === "Todas" ? "bg-cyan-500/15 text-cyan-300" : "hover:bg-background/60 text-muted-foreground"}`}
+            onClick={() => { setSelectedFolder("Todas"); setSelectedNote(null); }}
+          >
+            Todas as pastas
+            <span className="text-xs">{(notes ?? []).length}</span>
+          </button>
+          {(folders ?? []).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`w-full text-left text-sm px-2 py-1.5 rounded flex items-center justify-between ${selectedFolder === f ? "bg-cyan-500/15 text-cyan-300" : "hover:bg-background/60 text-muted-foreground"}`}
+              onClick={() => { setSelectedFolder(f); setSelectedNote(null); }}
+            >
+              {f}
+              <span className="text-xs">{(notes ?? []).filter((n) => n.folder === f).length}</span>
+            </button>
+          ))}
+        </aside>
+
+        <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+          <div className="relative flex-1 min-w-56">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Buscar na memória..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          <Select value={selectedFolder} onValueChange={(v) => { setSelectedFolder(v); setQuery(""); setSelectedNote(null); }}>
+            <SelectTrigger className="w-44 md:hidden">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Todas">Todas as pastas</SelectItem>
+              {(folders ?? []).map((f) => (
+                <SelectItem key={f} value={f}>{f}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
           <DialogTrigger asChild>
             <Button onClick={openNew} className="bg-cyan-600 hover:bg-cyan-500">
               <Plus className="h-4 w-4 mr-1" /> Nova nota
@@ -193,6 +220,7 @@ export default function SuperMemoria() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {pending ? (
