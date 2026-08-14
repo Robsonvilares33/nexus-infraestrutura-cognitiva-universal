@@ -5,7 +5,7 @@ import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
   BarChart3, MessageSquare, Package, ShieldCheck,
-  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon
+  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
@@ -26,6 +26,7 @@ const NAV_ITEMS = [
   { path: "/analytics", label: "Analytics", icon: BarChart3 },
   { path: "/chat", label: "Chat", icon: MessageSquare },
   { path: "/marketplace", label: "Marketplace", icon: Package },
+  { path: "/profile", label: "Perfil", icon: UserCircle2 },
 ];
 
 const ADMIN_NAV_ITEMS = [

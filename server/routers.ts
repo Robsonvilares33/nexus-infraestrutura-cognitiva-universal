@@ -20,6 +20,10 @@ import {
   getMyMarketplacePlugins,
   addMarketplaceReview, getMarketplaceReviews, ensureMarketplaceInstall,
   listAllUsers, updateUserRole, setMarketplacePluginApproved, listAllMarketplacePlugins, deleteAnyMarketplacePlugin, getPlatformStats,
+  getUserProfile, upsertUserProfile, getUserMissionsHistory, getUserInstalledPlugins,
+  getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
+  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks,
+  searchMarketplacePluginsByTerms,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -325,6 +329,9 @@ export const appRouter = router({
       await updateMission(userId, missionId, { status: 'completed', result: resultText, confidence, completedAt: new Date() });
       await addFeedEvent(userId, { eventType: 'complete', message: `Missão concluída — confiança: ${Math.round(confidence * 100)}%`, missionId, confidence });
 
+      // Trigger mission webhooks in background (fire-and-forget)
+      fireMissionWebhooks(missionId, { input: input.input, result: resultText, confidence }).catch(() => {});
+
       // Send notification about mission completion
       try {
         const { notifyOwner } = await import("./_core/notification");
@@ -602,6 +609,54 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
     list: protectedProcedure
       .input(z.object({ query: z.string().optional(), category: z.string().optional() }).optional())
       .query(async ({ ctx, input }) => listMarketplacePlugins(input?.query, input?.category)),
+    semanticSearch: protectedProcedure
+      .input(z.object({ query: z.string(), limit: z.number().optional() }))
+      .query(async ({ ctx, input }) => {
+        const q = input.query.trim();
+        if (!q) return [];
+
+        // Step 1: use LLM to extract semantically relevant search terms/synonyms from the query
+        let terms: string[] = [q];
+        try {
+          const result = await invokeLLM({
+            model: "gpt-5-mini",
+            messages: [
+              {
+                role: "system",
+                content: "You expand a user's plugin search query into short Portuguese/English search terms that would match plugin names and descriptions (e.g. 'analisar dados' -> 'análise', 'dados', 'analytics'). Return JSON only.",
+              },
+              {
+                role: "user",
+                content: `Query: "${q}". Return 3-6 short lowercase search terms (single words or very short phrases), most relevant first.`,
+              },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "search_terms",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    terms: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["terms"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+          const parsed = JSON.parse(result.choices[0].message.content as string);
+          const expanded = (parsed.terms || []).filter((t: unknown) => typeof t === "string" && t.trim().length >= 2);
+          if (expanded.length > 0) terms = [q, ...expanded];
+        } catch {
+          // LLM failed — fall back to the raw query terms
+        }
+
+        // Step 2: match plugins whose name or description contains any term
+        const limit = Math.min(input.limit || 10, 50);
+        return searchMarketplacePluginsByTerms(terms.slice(0, 10), limit);
+      }),
     details: protectedProcedure
       .input(z.object({ pluginId: z.number() }))
       .query(async ({ ctx, input }) => getMarketplacePlugin(input.pluginId)),
@@ -678,6 +733,60 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
       .input(z.object({ pluginId: z.number() }))
       .mutation(async ({ input }) => {
         await deleteAnyMarketplacePlugin(input.pluginId);
+        return { success: true };
+      }),
+  }),
+
+  profile: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const profile = await getUserProfile(ctx.user.id);
+      return profile ?? { bio: null, avatar: null, preferences: null, createdAt: new Date(), updatedAt: new Date() };
+    }),
+    update: protectedProcedure
+      .input(z.object({
+        bio: z.string().max(500).optional(),
+        avatar: z.string().max(512).optional(),
+        accentColor: z.string().max(32).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const prefs = { accentColor: input.accentColor };
+        await upsertUserProfile(ctx.user.id, {
+          bio: input.bio,
+          avatar: input.avatar,
+          preferences: JSON.stringify(prefs),
+        });
+        return { success: true };
+      }),
+    history: protectedProcedure.query(async ({ ctx }) => {
+      const [missionsHist, installed, mpInstalls, reviews, shared] = await Promise.all([
+        getUserMissionsHistory(ctx.user.id),
+        getUserInstalledPlugins(ctx.user.id),
+        getUserMarketplaceInstalls(ctx.user.id),
+        getUserReviews(ctx.user.id),
+        getUserSharedProjects(ctx.user.id),
+      ]);
+      return { missions: missionsHist, plugins: installed, marketplaceInstalls: mpInstalls, reviews, sharedProjects: shared };
+    }),
+  }),
+
+  webhooks: router({
+    add: protectedProcedure
+      .input(z.object({
+        missionId: z.number(),
+        url: z.string().url().max(1024),
+        label: z.string().max(128).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await addMissionWebhook(input.missionId, ctx.user.id, input.url, input.label);
+        return { success: true };
+      }),
+    list: protectedProcedure
+      .input(z.object({ missionId: z.number() }))
+      .query(async ({ ctx, input }) => listMissionWebhooks(input.missionId, ctx.user.id)),
+    remove: protectedProcedure
+      .input(z.object({ webhookId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await removeMissionWebhook(input.webhookId, ctx.user.id);
         return { success: true };
       }),
   }),

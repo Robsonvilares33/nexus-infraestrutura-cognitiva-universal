@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   Plug, Search, Plus, Heart, Download, ExternalLink, Github, Trash2,
-  Package, Loader2, Star,
+  Package, Loader2, Star, Sparkles, SpellCheck,
 } from "lucide-react";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -32,6 +32,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function Marketplace() {
   const [query, setQuery] = useState("");
+  const [semantic, setSemantic] = useState(false);
   const [category, setCategory] = useState("all");
   const [queryInput, setQueryInput] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -68,7 +69,13 @@ export default function Marketplace() {
   const utils = trpc.useUtils();
   const { data: plugins, isLoading } = trpc.marketplace.list.useQuery(
     { query: query || undefined, category: category === "all" ? undefined : category },
+    { enabled: !semantic },
   );
+  const { data: semanticResults, isLoading: semanticLoading } = trpc.marketplace.semanticSearch.useQuery(
+    { query },
+    { enabled: semantic && query.trim().length >= 2, refetchOnWindowFocus: false },
+  );
+  const displayPlugins = semantic ? (semanticResults || []) : (plugins || []);
   const publishMutation = trpc.marketplace.publish.useMutation({
     onSuccess: () => {
       toast.success("Plugin publicado no marketplace!");
@@ -208,10 +215,22 @@ export default function Marketplace() {
             onChange={e => setQueryInput(e.target.value)}
             onBlur={() => setQuery(queryInput)}
             onKeyDown={e => e.key === "Enter" && setQuery(queryInput)}
-            placeholder="Buscar plugins..."
+            placeholder={semantic ? "Busca semântica com IA..." : "Buscar plugins..."}
             className="pl-9 bg-transparent border-[rgba(150,175,220,0.12)] text-[#e2e8f4] text-xs font-mono"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => setSemantic(!semantic)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[9px] font-mono rounded border transition-colors ${
+            semantic
+              ? "bg-[#7cf3ff]/10 text-[#7cf3ff] border-[#7cf3ff]/40"
+              : "text-[#7684a0] border-[rgba(150,175,220,0.12)] hover:border-[rgba(150,175,220,0.25)]"
+          }`}
+        >
+          {semantic ? <Sparkles className="h-3 w-3" /> : <SpellCheck className="h-3 w-3" />}
+          SEMÂNTICA
+        </button>
         <Select value={category} onValueChange={setCategory}>
           <SelectTrigger className="w-40 bg-transparent border-[rgba(150,175,220,0.12)] text-[#e2e8f4] text-xs font-mono">
             <SelectValue />
@@ -224,21 +243,25 @@ export default function Marketplace() {
             <SelectItem value="utility">Utilitários</SelectItem>
           </SelectContent>
         </Select>
-        <span className="text-[9px] font-mono text-[#7684a0]">{plugins?.length || 0} plugins</span>
+        <span className="text-[9px] font-mono text-[#7684a0]">{displayPlugins.length} plugins</span>
       </div>
 
+      {semantic && query.trim().length >= 2 && (
+        <p className="text-[9px] font-mono text-[#7684a0]">⚡ Busca semântica IA{semanticLoading ? " — processando..." : ""}</p>
+      )}
+
       {/* Grid */}
-      {isLoading ? (
+      {(isLoading || semanticLoading) ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="nexus-card p-4 h-48 animate-pulse" />
           ))}
         </div>
-      ) : !plugins || plugins.length === 0 ? (
+      ) : displayPlugins.length === 0 ? (
         <div className="nexus-card p-10 flex flex-col items-center gap-3">
           <Plug className="h-8 w-8 text-[#7cf3ff]/30" />
           <p className="text-sm font-mono text-[#aab4d6]">
-            {query || category !== "all" ? "Nenhum plugin encontrado com esses filtros." : "O marketplace está vazio."}
+            {semantic && query ? "Nenhum plugin semanticamente relevante encontrado. Tente outra descrição." : query || category !== "all" ? "Nenhum plugin encontrado com esses filtros." : "O marketplace está vazio."}
           </p>
           <p className="text-[10px] font-mono text-[#7684a0]">
             Seja o primeiro a publicar um plugin para a comunidade NEXUS.
@@ -246,7 +269,7 @@ export default function Marketplace() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {plugins.map(p => (
+          {displayPlugins.map(p => (
             <div key={p.id} className="nexus-card p-4 flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <div>

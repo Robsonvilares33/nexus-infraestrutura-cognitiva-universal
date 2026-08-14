@@ -94,3 +94,15 @@
 - [x] Vitest coverage for reviews and admin (26 tests passing)
 - [x] TypeScript clean, tests 26/26, screenshots verified
 - [x] Checkpoint + report
+
+## Phase 6 — Profile, Semantic Search, Webhooks
+- [x] userProfiles + missionWebhooks tables (migration 0007 applied)
+- [x] db.ts helpers: profile get/upsert, history (missions, plugins, mp installs, reviews, shares), webhooks CRUD + fire (POST JSON on completion)
+- [x] Routers: profile.get/update/history; webhooks.add/list/remove; missions.execute fires webhooks fire-and-forget
+- [x] Profile page UI (bio, avatar URL, accent color, history cards)
+- [x] Profile nav item + /profile route
+- [x] Marketplace semantic search (gpt-5-mini term expansion + SQL OR LIKE, approved-only, SEMÂNTICA toggle UI)
+- [x] Webhook management UI in MinhaIA mission cards (add/remove, HTTP status chips)
+- [x] Vitest coverage for profile and webhooks (31 tests passing)
+- [x] TypeScript clean, screenshots verified (/profile, /marketplace, /minha-ia)
+- [x] Checkpoint + report

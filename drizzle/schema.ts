@@ -169,3 +169,31 @@ export const marketplaceInstalls = mysqlTable("marketplaceInstalls", {
 
 export type MarketplaceInstall = typeof marketplaceInstalls.$inferSelect;
 export type InsertMarketplaceInstall = typeof marketplaceInstalls.$inferInsert;
+
+// User Profiles - bio, avatar, preferences
+export const userProfiles = mysqlTable("userProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique(),
+  bio: text("bio"),
+  avatar: text("avatar"),
+  preferences: text("preferences"), // JSON: theme accents, notifications
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type UserProfile = typeof userProfiles.$inferSelect;
+export type InsertUserProfile = typeof userProfiles.$inferInsert;
+
+// Mission Webhooks - trigger external URLs when missions complete
+export const missionWebhooks = mysqlTable("missionWebhooks", {
+  id: int("id").autoincrement().primaryKey(),
+  missionId: int("missionId").notNull(),
+  url: text("url").notNull(),
+  label: text("label"),
+  lastStatus: int("lastStatus"),
+  lastTriggeredAt: timestamp("lastTriggeredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type MissionWebhook = typeof missionWebhooks.$inferSelect;
+export type InsertMissionWebhook = typeof missionWebhooks.$inferInsert;
