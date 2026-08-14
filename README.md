@@ -1,6 +1,8 @@
 # NEXUS - Plataforma Cognitiva Universal
 
-Experiencia web para visualizar e operar um ecossistema cognitivo modular com missoes, agentes, modelos, plugins, memoria e universo 3D.
+Infraestrutura cognitiva universal: um ecossistema distribuido de inteligencias artificiais, agentes especializados, ferramentas e modelos. Nao e um chatbot - e um universo cognitivo vivo com agentes especializados (Sincronia, Pesquisa, Memoria, Codigo, Planejamento, Critica, Sintese, Execucao, Comunicacao), visualizacao 3D fractal, banco de memoria, marketplace de plugins, integracao GitHub e aprendizado continuo.
+
+> Esta copia combina o codigo da plataforma web completa (React 19 + tRPC + Express + Drizzle/MySQL + Socket.io + Three.js) com o executor local-first (SQLite + Ollama). Na nuvem, a plataforma roda sobre o ambiente Manus com autenticacao, banco e IA ja configurados. Abaixo estao as instrucoes para rodar localmente.
 
 ## Rodar localmente
 
