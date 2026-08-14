@@ -299,3 +299,39 @@ export const missionTemplates = mysqlTable("missionTemplates", {
   icon: varchar("icon", { length: 32 }).notNull().default("Zap"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Phase 14: User LLM settings — provider/model/key chosen per user (open-source flexibility)
+export const userLlmSettings = mysqlTable("userLlmSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique(),
+  provider: varchar("provider", { length: 32 }).notNull().default("forge"),
+  model: varchar("model", { length: 128 }),
+  apiKey: varchar("apiKey", { length: 512 }),
+  baseUrl: varchar("baseUrl", { length: 512 }),
+  // Computer tools permission: which tool groups the user allows for agent missions
+  shellEnabled: boolean("shellEnabled").default(false).notNull(),
+  webEnabled: boolean("webEnabled").default(true).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type UserLlmSettings = typeof userLlmSettings.$inferSelect;
+export type InsertUserLlmSettings = typeof userLlmSettings.$inferInsert;
+
+// Phase 14b: Super Memória — Obsidian-style notes that the agent and user never lose
+export const superNotes = mysqlTable("superNotes", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(), // unlimited Markdown (like an Obsidian note)
+  folder: varchar("folder", { length: 128 }).notNull().default("Geral"),
+  tags: varchar("tags", { length: 512 }),
+  links: varchar("links", { length: 512 }), // JSON: [[wiki-links]] to other notes
+  source: mysqlEnum("source", ["user", "agent"]).default("user").notNull(),
+  missionId: int("missionId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SuperNote = typeof superNotes.$inferSelect;
+export type InsertSuperNote = typeof superNotes.$inferInsert;

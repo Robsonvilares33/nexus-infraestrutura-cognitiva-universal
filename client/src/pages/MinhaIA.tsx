@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
-import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu } from "lucide-react";
+import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu, Terminal, Globe } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription
@@ -16,6 +16,22 @@ interface LiveEvent {
   agentName?: string;
   createdAt?: Date;
   timestamp?: number;
+}
+
+/** Indicador das ferramentas de computador ativadas para o modo agente (Fase 14) */
+function ToolsStatus() {
+  const { data } = trpc.userLlm.get.useQuery(undefined, { staleTime: 30_000 });
+  if (!data) return null;
+  const parts: string[] = [];
+  if (data.shellEnabled === true) parts.push("TERMINAL");
+  if (data.webEnabled !== false) parts.push("WEB");
+  return (
+    <span className="text-[9px] font-mono text-[#ffd479] flex items-center gap-1">
+      {data.shellEnabled === true && <Terminal className="h-3 w-3" />}
+      {data.webEnabled !== false && !data.shellEnabled && <Globe className="h-3 w-3" />}
+      FERRAMENTAS: {parts.join(" + ") || "MEMÓRIA"}
+    </span>
+  );
 }
 
 interface AgentStep {
@@ -131,6 +147,7 @@ export default function MinhaIA() {
   const unscheduleMutation = trpc.missions.unschedule.useMutation();
   const { data: scheduledMissions, refetch: refetchScheduled } = trpc.missions.listScheduled.useQuery();
   const [input, setInput] = useState("");
+  const llmConfig = trpc.userLlm.get.useQuery();
   const [agentMode, setAgentMode] = useState(false);
   const [agentMissionId, setAgentMissionId] = useState<number | null>(null);
   // Ref para transportar o missionId do modo agente até o onMutate do
@@ -318,6 +335,7 @@ export default function MinhaIA() {
             </span>
             <span className="text-[9px] font-mono text-[#7684a0]">(loop autônomo NEXUS × Manus — console ao vivo)</span>
           </label>
+          <ToolsStatus />
         </div>
         <form
           className="flex gap-3"

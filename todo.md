@@ -193,3 +193,24 @@
 - [x] Frontend: console de agente com stream ao vivo e progresso iterativo (Modo Agente em Minha IA) — observabilidade em tempo real dos tool calls/resultados
 - [x] Teste de estresse da arquitetura fundida — 60/60 vitest incl. teste live; fast-fail verificado
 - [x] Sincronizar GitHub
+
+## Fase 14 — Agentes de computador + multi-modelo (nível Claude Code / OpenClaw / Hermes / Mirofishi)
+
+- [ ] Pesquisar capacidades de agentes open source (Claude Code, OpenClaw, Hermes, Mirofishi) e definir arquitetura de computer tools
+- [ ] Backend: sistema de computer tools no loop do agente — execução de shell segura, leitura/escrita/criação de arquivos, navegação web, gerenciamento de processos
+- [ ] Backend: sandbox de segurança para computer tools (diretório workspace isolado, bloqueio de comandos perigosos, permissão explícita do usuário, timeout de execução)
+- [ ] Backend: seleção multi-modelo de LLM — OpenAI (gpt-5-mini e outros), Anthropic, Google Gemini, Mistral, Groq, OpenRouter, modelos locais via Ollama, chave própria via .env
+- [ ] UI: Minha IA — escolha do modelo/provedor e das ferramentas habilitadas por missão
+- [ ] UI: Config — gerenciamento de provedores de IA (chave, endpoint, modelo padrão)
+- [ ] Documentação open source: README.md com guia de instalação local (MySQL/TiDB, Node.js 22+, .env.example, chave LLM própria), docs de computer tools
+- [ ] Testes vitest para computer tools e multi-modelo, verificação final, checkpoint e sync GitHub
+
+## Fase 14b — Super Memória (estilo Obsidian — "IA que nunca esquece")
+
+- [ ] Tabela super_notes (Markdown ilimitado, título, tags, pasta/caderno, links entre notas, criado/atualizado)
+- [ ] Backend: CRUD de notas (criar/editar/excluir/listar por pasta/tag/busca)
+- [ ] Backend: extração automática de notas pelo agente a cada missão (descobertas viram notas da Super Memória)
+- [ ] Backend: consulta da Super Memória pelo agente antes de responder (recovery por tags/palavras/semanticidade via LLM)
+- [ ] UI: página Super Memória — editor Markdown, árvore de pastas, tags, links entre notas, busca
+- [ ] UI: blocos de notas relevantes na Minha IA durante execução de missões
+- [ ] Vitest coverage para super_notes + integração com o loop do agente

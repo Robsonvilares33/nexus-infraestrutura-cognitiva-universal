@@ -39,6 +39,8 @@ import {
   addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
   getWeeklyGrowthStats, getUserById,
   seedMissionTemplates,
+  addSuperNote, listSuperNotes, getSuperNote, updateSuperNote, deleteSuperNote, searchSuperNotes,
+  getLlmSettings, upsertLlmSettings,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -466,12 +468,22 @@ export const appRouter = router({
       }
     }),
 
-    /** Fase 13 — Modo Agente (fusão NEXUS × Manus): loop autônomo com tool calling */
+    /** Fase 13/14 — Modo Agente (fusão NEXUS × Manus): loop autônomo com tool calling + computer tools */
     executeAgent: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string() })).mutation(async ({ ctx, input }) => {
       const { runAgentLoop } = await import("./nexus-agent");
+      const { getLlmSettings } = await import("./db");
       const userId = ctx.user.id;
       try {
-        return await runAgentLoop(userId, input.missionId, input.input);
+        // User's chosen model/provider (open-source flexibility) + computer tool permissions
+        const llm = await getLlmSettings(userId);
+        const provider = llm?.apiKey
+          ? { provider: llm.provider as any, apiKey: llm.apiKey ?? undefined, baseUrl: llm.baseUrl ?? undefined, model: llm.model ?? undefined }
+          : { provider: (llm?.provider ?? "forge") as any, model: llm?.model ?? undefined };
+        return await runAgentLoop(userId, input.missionId, input.input, {
+          provider,
+          enableComputerTools: llm?.shellEnabled === true,
+          webEnabled: llm?.webEnabled !== false,
+        });
       } catch (error) {
         try {
           await updateMission(userId, input.missionId, { status: 'failed', completedAt: new Date() }).catch(() => {});
@@ -1171,6 +1183,100 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
     remove: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => ({ success: await removeMissionTemplate(input.id) })),
+  }),
+
+  // Fase 14b — Super Memória (estilo Obsidian: notas Markdown que nunca se perdem)
+  superNotes: router({
+    list: protectedProcedure
+      .input(z.object({ folder: z.string().optional() }).optional())
+      .query(async ({ ctx, input }) => listSuperNotes(ctx.user.id, input ?? {})),
+    get: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ ctx, input }) => getSuperNote(ctx.user.id, input.id)),
+    create: protectedProcedure
+      .input(z.object({
+        title: z.string().min(1).max(255),
+        content: z.string().min(1),
+        folder: z.string().max(128).optional(),
+        tags: z.array(z.string().max(64)).optional(),
+        links: z.array(z.string().max(255)).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const id = await addSuperNote({
+          userId: ctx.user.id,
+          title: input.title,
+          content: input.content,
+          folder: input.folder ?? "Geral",
+          tags: input.tags?.length ? JSON.stringify(input.tags) : undefined,
+          links: input.links?.length ? JSON.stringify(input.links) : undefined,
+          source: "user",
+        });
+        return { success: true, id };
+      }),
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        title: z.string().min(1).max(255).optional(),
+        content: z.string().min(1).optional(),
+        folder: z.string().max(128).optional(),
+        tags: z.array(z.string().max(64)).optional(),
+        links: z.array(z.string().max(255)).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { id, ...rest } = input;
+        const patch: Record<string, unknown> = {};
+        if (rest.title) patch.title = rest.title;
+        if (rest.content) patch.content = rest.content;
+        if (rest.folder) patch.folder = rest.folder;
+        if (rest.tags) patch.tags = JSON.stringify(rest.tags);
+        if (rest.links) patch.links = JSON.stringify(rest.links);
+        await updateSuperNote(ctx.user.id, id, patch);
+        return { success: true };
+      }),
+    remove: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => ({ success: await deleteSuperNote(ctx.user.id, input.id) })),
+    search: protectedProcedure
+      .input(z.object({ query: z.string().min(1).max(200) }))
+      .query(async ({ ctx, input }) => searchSuperNotes(ctx.user.id, input.query)),
+    folders: protectedProcedure
+      .query(async ({ ctx }) => {
+        const notes = await listSuperNotes(ctx.user.id);
+        return Array.from(new Set(notes.map((n: { folder: string }) => n.folder))).sort();
+      }),
+  }),
+
+  // Fase 14 — Configuração de LLM por usuário (provedor/modelo/chave livre)
+  userLlm: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const settings = await getLlmSettings(ctx.user.id);
+      // Never send the raw key back in full — mask it
+      if (settings?.apiKey) settings.apiKey = `${settings.apiKey.slice(0, 8)}••••••••`;
+      return settings ?? { provider: "forge", shellEnabled: false, webEnabled: true };
+    }),
+    update: protectedProcedure
+      .input(z.object({
+        provider: z.enum(["forge", "openai", "anthropic", "google", "groq", "openrouter", "ollama", "qwen", "custom"]).optional(),
+        model: z.string().max(128).optional(),
+        apiKey: z.string().max(512).optional(),
+        baseUrl: z.string().max(512).optional(),
+        shellEnabled: z.boolean().optional(),
+        webEnabled: z.boolean().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Keep the stored key when the user sends nothing / mask
+        const existing = await getLlmSettings(ctx.user.id);
+        const patch: Record<string, unknown> = {};
+        if (input.provider) patch.provider = input.provider;
+        if (input.model) patch.model = input.model;
+        if (input.apiKey) patch.apiKey = input.apiKey; // user supplied a real key
+        else if (input.provider && input.provider !== "forge") patch.apiKey = existing?.apiKey;
+        if (input.baseUrl) patch.baseUrl = input.baseUrl;
+        if (input.shellEnabled !== undefined) patch.shellEnabled = input.shellEnabled;
+        if (input.webEnabled !== undefined) patch.webEnabled = input.webEnabled;
+        await upsertLlmSettings(ctx.user.id, patch as any);
+        return { success: true };
+      }),
   }),
 });
 export type AppRouter = typeof appRouter;
