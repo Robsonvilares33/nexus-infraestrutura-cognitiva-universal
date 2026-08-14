@@ -169,3 +169,7 @@
 - [ ] Streaming real do feed cognitivo para execução de missões agendadas
 - [ ] Busca semântica vetorial (embeddings) na Memória
 - [ ] Compartilhamento de missões entre usuários (exportar/importar)
+
+## Phase 11 Follow-up
+- [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
+- [x] Sincronização final com o GitHub (commit a5279bd)
