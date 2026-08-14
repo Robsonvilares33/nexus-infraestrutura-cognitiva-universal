@@ -1,65 +1,121 @@
-# NEXUS — Infraestrutura Cognitiva Universal
+# NEXUS - Plataforma Cognitiva Universal
 
-Plataforma cognitiva open source que transforma **missões** em realidade através de um ecossistema distribuído de inteligências artificiais: agentes especializados, ferramentas de computador, memória persistente e modelos de IA intercambiáveis. Não é um chatbot — é um universo cognitivo vivo.
+Infraestrutura cognitiva universal: um ecossistema distribuido de inteligencias artificiais, agentes especializados, ferramentas e modelos. Nao e um chatbot - e um universo cognitivo vivo com agentes especializados (Sincronia, Pesquisa, Memoria, Codigo, Planejamento, Critica, Sintese, Execucao, Comunicacao), visualizacao 3D fractal, banco de memoria, marketplace de plugins, integracao GitHub e aprendizado continuo.
 
-> **Open source**: qualquer pessoa pode baixar este repositório e rodar no próprio computador. O guia completo está em [`docs/LOCAL-SETUP.md`](docs/LOCAL-SETUP.md).
+> Esta copia combina o codigo da plataforma web completa (React 19 + tRPC + Express + Drizzle/MySQL + Socket.io + Three.js) com o executor local-first (SQLite + Ollama). Na nuvem, a plataforma roda sobre o ambiente Manus com autenticacao, banco e IA ja configurados. Abaixo estao as instrucoes para rodar localmente.
 
-## Arquitetura
+## Funcionalidades incluidas
 
-React 19 · Tailwind 4 · Express 4 · tRPC 11 · Drizzle ORM (MySQL/TiDB) · SSE (Server-Sent Events) · Vitest. O executor de agentes roda no servidor (`server/nexus-agent.ts`) e segue o padrão **think-act-observe** inspirado na arquitetura de agentes da Manus: o modelo pensa, escolhe uma ferramenta, observa o resultado e repete, com limite de iterações e fallback por síntese.
-
-## Módulos da plataforma
-
-| Módulo | Descrição |
+| Modulo | Descricao |
 |---|---|
-| Universo 3D | Visualização fractal do ecossistema com Three.js |
-| Missões (Fase 13) | Loop agente autônomo NEXUS × Manus com console ao vivo (SSE + polling de fallback), ferramentas `search_memory`, `save_memory`, `ask_agent`, `finish` |
-| Computer Tools (Fase 14) | O agente executa `run_shell`, `read_file`, `write_file`, `edit_file`, `list_dir`, `web_fetch` com sandbox de segurança (workspace isolado, bloqueio de comandos perigosos, timeout 120s) — mesmo conjunto conceitual do Claude Code / OpenClaw |
-| Super Memória (Fase 14) | Cofre de notas estilo Obsidian: Markdown infinito, pastas, tags, links `[[nota]]`, busca — o agente grava descobertas automaticamente a cada missão |
-| Motor de IA aberto (Fase 14) | Qualquer provedor: Manus Forge (padrão), OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, QwenCloud, Ollama local, ou qualquer servidor OpenAI-compatível (vLLM, LM Studio) |
-| Memória | Banco de memória com busca semântica via LLM e identidade unificada por usuário |
-| Marketplace | Plugins da comunidade com avaliação, threads aninhadas e verificação automática de código (5 testes: credenciais, sintaxe, exportação, tamanho, fonte) |
-| Projetos compartilhados | Convites, chat ao vivo por projeto e missões sincronizadas em tempo real |
-| Conquistas & Leaderboard | Gamificação: 8 badges, XP por contribuição (+50 plugin, +20 missão, +10 review, +5 colaboração), top-20 |
-| Reputação | Níveis Iniciante → Oráculo com progresso no Perfil |
-| E-mails reais | Integração Resend para notificações |
-| PWA & offline | Instalável no celular/desktop; service worker cacheia missões recentes para consulta offline |
-| Notificações em tempo real | Push via Socket.io com toasts e central de notificações |
-| Templates de Missão | 6 modelos prontos no Marketplace |
-| Admin | Painel de administração (role `admin`), promoção de usuários, métricas |
-| Indicador de conexão | Status CONECTADO/OFFLINE no cabeçalho |
+| Universo 3D | Visualizacao fractal do ecossistema com Three.js |
+| Missoes | Orquestracao multiagente com streaming em tempo real (Socket.io) |
+| Memoria | Banco de memoria com busca semantica via LLM |
+| Marketplace | Plugins da comunidade com avaliacao, reviews, busca semantica e verificacao automatica de codigo |
+| Projetos compartilhados | Convidar colaboradores, chat ao vivo por projeto e missoes sincronizadas em tempo real |
+| Verificacao de plugins | 5 testes automaticos (credenciais expostas, sintaxe, exportacao, tamanho, fonte presente) |
+| Conquistas | Sistema de gamificacao com 8 badges e notificacoes |
+| E-mails reais | Integracao Resend para notificacoes por e-mail |
+| PWA | Instalavel no celular/desktop via service worker e manifest |
+| Threads de plugins | Discussoes aninhadas (respostas) nos detalhes de cada plugin do Marketplace |
+| Leaderboard | Ranqueamento top-20 por XP de contribuicoes comunitarias (+50 plugin, +20 missao, +10 review, +5 colaboracao) |
+| Modo offline | Service worker armazena missoes recentes em cache para consulta sem conexao |
+| Reputacao & XP | Niveis de reputacao baseados em XP (Iniciante, Explorador, Operador, Engenheiro, Arquiteto, Mago, Oráculo) com progresso no Perfil |
+| Notificacoes em tempo real | Push instantaneo via Socket.io com toasts (Sonner) e Central de Notificacoes com leitura e filtros |
+| Templates de Missao | 6 modelos prontos no Marketplace para iniciar missoes com um clique |
+| Indicador de conexao | Status CONECTADO/OFFLINE no cabeçalho via navigator.onLine |
 
 ## Rodar localmente
 
-Requisitos: **Node.js 22+**, **pnpm**, **MySQL 8+ ou TiDB** (o TiDB Serverless é grátis em [tidbcloud.com](https://tidbcloud.com)), ~2 GB de disco. Roda em PCs modestos (i3 / 8–12 GB RAM), pois o peso da IA fica no provedor de modelo escolhido.
-
 ```bash
-git clone https://github.com/Robsonvilares33/nexus-infraestrutura-cognitiva-universal.git
-cd nexus-infraestrutura-cognitiva-universal
-pnpm install
-# crie seu banco e configure .env (modelo em docs/ENV-TEMPLATE.md)
-pnpm drizzle-kit push
-pnpm dev
+npm install
+npm run dev
 ```
 
-Abra `http://localhost:3000`. Veja os detalhes em [`docs/LOCAL-SETUP.md`](docs/LOCAL-SETUP.md), incluindo autenticação sem OAuth Manus para uso pessoal.
+Abra `http://localhost:5173`.
 
-## Usar qualquer modelo de IA
+## Rodar com backend local, SQLite e IA local opcional
 
-Em execução hospedada: **Config → Motor de IA** — escolha o provedor, cole a chave e (opcional) ative as ferramentas de computador e web.
+```bash
+npm install
+npm run local:doctor
+npm run dev:full
+```
 
-Em execução local: `NEXUS_LLM_PROVIDER` no `.env` (aceita `forge | openai | anthropic | google | groq | openrouter | ollama | qwen | custom`). Para modelos totalmente locais e offline, rode o [Ollama](https://ollama.com) e aponte `OLLAMA_BASE_URL`.
+Abra `http://localhost:5173`. A API local roda em `http://127.0.0.1:8787/api`.
 
-Provedores gratuitos para começar: **Groq** ([console.groq.com/keys](https://console.groq.com/keys)), **Google Gemini** ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)), **OpenRouter** ([openrouter.ai/keys](https://openrouter.ai/keys)), **Ollama local** ([ollama.com/download](https://ollama.com/download)).
+O backend salva missoes, memorias, plugins e eventos em `data/nexus.db`. Esse arquivo fica fora do Git.
+
+## Usar sem API paga
+
+O NEXUS funciona em tres modos:
+
+- `static`: GitHub Pages, sem backend.
+- `offline`: backend local com SQLite, mas sem Ollama rodando. As missoes usam um planejador local deterministico.
+- `local-ai`: backend local com Ollama e modelo baixado. As missoes usam IA local.
+
+Para IA local neste computador, comece leve:
+
+```bash
+ollama pull llama3.2:3b
+```
+
+Alternativas leves: `llama3.2:1b`, `qwen3.5:2b`, `deepseek-r1:1.5b`. Modelos 7B/8B podem funcionar, mas devem ficar lentos em CPU i3 com 12 GB RAM e sem GPU dedicada.
+
+## Build de producao
+
+```bash
+npm run build
+npm run preview
+```
+
+O build estatico sai em `dist/` e pode ser hospedado em GitHub Pages, Cloudflare Pages, Netlify, Vercel ou qualquer servidor HTTP.
+
+## Publicar no GitHub Pages
+
+1. Crie ou conecte um repositorio GitHub.
+2. Suba este projeto para a branch `main`.
+3. O workflow em `.github/workflows/deploy.yml` publica automaticamente o conteudo de `dist/` no GitHub Pages.
+
+## Endpoints locais
+
+- `GET /api/health`
+- `GET /api/session`
+- `POST /api/session`
+- `GET /api/catalog`
+- `GET /api/agents/status`
+- `GET /api/tools`
+- `POST /api/tools/run`
+- `GET /api/artifacts`
+- `GET /api/timeline`
+- `GET /api/plugins`
+- `POST /api/plugins/:name/connect`
+- `GET /api/memory`
+- `POST /api/memory`
+- `GET /api/missions`
+- `POST /api/missions`
+- `GET /api/missions/:id/timeline`
+
+## Ferramentas locais seguras
+
+Use `POST /api/tools/run` com `name` e `input`.
+
+- `workspace.summary`: lista arquivos do projeto.
+- `workspace.search`: busca texto no projeto, ignorando `.git`, `node_modules`, `dist` e `data`.
+- `file.read`: le um arquivo especifico do projeto com limite de tamanho.
+- `document.create`: cria um markdown em `data/generated/docs/`.
+- `project.scaffold`: cria uma estrutura inicial em `data/generated/projects/`.
+- `artifact.create`: cria pacote de missao em `data/artifacts/`.
+
+## Estado atual
+
+Esta versao deixa a ideia funcionando como aplicacao web globalmente publicavel e como pacote local-first. Ja existe API local, SQLite, catalogo de ecossistema, missao persistida, timeline de execucao, adaptador Ollama com fallback offline e executor local que cria artefatos reais em `data/artifacts/` e documentos/projetos em `data/generated/`. Autenticacao OAuth, conectores externos, memoria vetorial e execucao avancada de ferramentas ainda sao proximos modulos.
 
 ## Testes
 
 ```bash
-pnpm test
+npm install
+npm test
 ```
 
-Vitest cobre rotas tRPC, validação de plugins, colaboração, threads, XP, reputação, templates, o loop agente (unit + integração com LLM real e banco real) e validação live de chaves de provedores externos — 60+ testes passando.
-
-## Publicar
-
-O código é portátil: GitHub Pages (build estático), qualquer servidor com Node 22, ou hospedagem nativa Manus (botão **Publish** na interface, com domínio customizado).
+A suíte de testes (Vitest) cobre rotas tRPC, validação de plugins, colaboração, threads, XP, reputação, templates de missão e o callback de push de notificações — mais de 50 testes passando.
