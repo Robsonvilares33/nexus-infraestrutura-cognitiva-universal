@@ -199,6 +199,23 @@ export type MissionWebhook = typeof missionWebhooks.$inferSelect;
 export type InsertMissionWebhook = typeof missionWebhooks.$inferInsert;
 
 // Community-suggested dynamic categories for the marketplace
+export const inAppNotifications = mysqlTable("in_app_notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  type: varchar("type", { length: 64 }).notNull().default("info"),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content"),
+  isRead: boolean("is_read").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const userAchievements = mysqlTable("user_achievements", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  badgeKey: varchar("badge_key", { length: 64 }).notNull(),
+  unlockedAt: timestamp("unlocked_at").defaultNow().notNull(),
+});
+
 export const suggestedCategories = mysqlTable("suggestedCategories", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 64 }).notNull(),

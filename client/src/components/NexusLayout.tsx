@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
-  BarChart3, MessageSquare, Package, ShieldCheck,
+  BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy,
   LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -27,6 +27,8 @@ const NAV_ITEMS = [
   { path: "/chat", label: "Chat", icon: MessageSquare },
   { path: "/marketplace", label: "Marketplace", icon: Package },
   { path: "/profile", label: "Perfil", icon: UserCircle2 },
+  { path: "/notificacoes", label: "Notificações", icon: Bell },
+  { path: "/conquistas", label: "Conquistas", icon: Trophy },
 ];
 
 const ADMIN_NAV_ITEMS = [
@@ -39,6 +41,12 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+
+  const { data: unreadCount } = trpc.notifications.unreadCount.useQuery(undefined, {
+    enabled: isAuthenticated,
+    refetchInterval: 15000,
+  });
+  const unread = (unreadCount as { count?: number } | undefined)?.count ?? 0;
 
   // Seed the ecosystem once when authenticated.
   // useMutation must be declared at the top level (before early returns),
@@ -108,7 +116,16 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
                 title={item.label}
               >
                 <item.icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span className="font-mono">{item.label}</span>}
+                {!collapsed && (
+                  <span className="font-mono flex-1 text-left">
+                    {item.label}
+                    {item.path === "/notificacoes" && unread > 0 && (
+                      <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ffd479]/15 px-1 text-[9px] font-bold text-[#ffd479] border border-[#ffd479]/30">
+                        {unread}
+                      </span>
+                    )}
+                  </span>
+                )}
               </button>
             </Link>
           );

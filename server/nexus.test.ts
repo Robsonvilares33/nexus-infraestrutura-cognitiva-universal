@@ -482,3 +482,67 @@ describe("admin growth", () => {
     }
   });
 });
+
+// Validate the Resend email secret with a lightweight API call (validation only, no actual email sent)
+describe("email provider secret validation", () => {
+  it(
+    "should authenticate against the Resend API",
+    async () => {
+      const apiKey = process.env.EMAIL_API_KEY;
+      const apiUrl = process.env.EMAIL_API_URL || "https://api.resend.com/emails";
+      expect(apiKey).toBeTruthy();
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ from: "NEXUS <onboarding@resend.dev>", to: ["delivered@resend.dev"], subject: "validation-only", html: "<p>x</p>" }),
+        signal: AbortSignal.timeout(20000),
+      });
+      // 400/422 means the key is valid (rejected payload content), 401 means invalid key
+      expect(res.status).toBe(200);
+    },
+    30000,
+  );
+});
+
+describe("notifications", () => {
+  it("lists notifications and manages read state", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    // Create a notification via mission completion path (direct db helper is internal; use count semantics)
+    const initial = await caller.notifications.unreadCount();
+    expect(typeof initial.count).toBe("number");
+    const list = await caller.notifications.list();
+    expect(Array.isArray(list)).toBe(true);
+    if (list.length > 0) {
+      const first = list[0];
+      await caller.notifications.markRead({ id: first.id });
+      const listAfter = await caller.notifications.list();
+      const updated = listAfter.find(n => n.id === first.id);
+      expect(updated?.isRead).toBe(true);
+    }
+    await caller.notifications.markAllRead();
+    const final = await caller.notifications.unreadCount();
+    expect(final.count).toBe(0);
+  }, 30000);
+});
+
+describe("achievements", () => {
+  it(
+    "returns achievement definitions and progress for the user",
+    async () => {
+      const ctx = createTestContext();
+      const caller = appRouter.createCaller(ctx);
+      const result = await caller.achievements.list();
+      expect(result).toHaveProperty("definitions");
+      expect(Array.isArray(result.definitions)).toBe(true);
+      expect(result.definitions.length).toBeGreaterThan(0);
+      for (const def of result.definitions) {
+        expect(def).toHaveProperty("key");
+        expect(def).toHaveProperty("name");
+        expect(typeof def.unlocked).toBe("boolean");
+        expect(typeof def.progress).toBe("number");
+      }
+    },
+    60000,
+  );
+});

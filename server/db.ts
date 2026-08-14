@@ -1,10 +1,10 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
   projectShares, marketplacePlugins, marketplaceReviews, marketplaceInstalls,
   suggestedCategories,
-  userProfiles, missionWebhooks,
+  userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -910,4 +910,144 @@ export async function getUserById(id: number) {
   if (!db) return null;
   const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
   return rows.length > 0 ? rows[0] : null;
+}
+
+// ---------- In-app notifications ----------
+export async function addInAppNotification(userId: number, type: string, title: string, content?: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(inAppNotifications).values({ userId, type, title, content });
+}
+
+export async function listUserNotifications(userId: number, limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select()
+    .from(inAppNotifications)
+    .where(eq(inAppNotifications.userId, userId))
+    .orderBy(desc(inAppNotifications.createdAt))
+    .limit(limit);
+  return rows;
+}
+
+export async function markNotificationRead(notificationId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(inAppNotifications)
+    .set({ isRead: true })
+    .where(and(eq(inAppNotifications.id, notificationId), eq(inAppNotifications.userId, userId)));
+}
+
+export async function markAllNotificationsRead(userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(inAppNotifications)
+    .set({ isRead: true })
+    .where(eq(inAppNotifications.userId, userId));
+}
+
+export async function countUnreadNotifications(userId: number) {
+  const db = await getDb();
+  if (!db) return { count: 0 };
+  const rows = await db.select().from(inAppNotifications)
+    .where(and(eq(inAppNotifications.userId, userId), eq(inAppNotifications.isRead, false)));
+  return { count: rows.length };
+}
+
+// ---------- Real email integration (optional, gated by EMAIL_API_KEY; Resend-compatible payload) ----------
+export async function sendEmail(to: string, subject: string, body: string): Promise<boolean> {
+  const apiKey = process.env.EMAIL_API_KEY;
+  const apiUrl = process.env.EMAIL_API_URL || "";
+  if (!apiKey || !apiUrl || !to) return false;
+  try {
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        from: "NEXUS <onboarding@resend.dev>",
+        to: [to],
+        subject,
+        html: `<h2>${subject.replace(/</g, "&lt;")}</h2><p>${body.replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>`,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---------- Achievements ----------
+export const ACHIEVEMENTS: Array<{
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+}> = [
+  { key: "first_mission", name: "Primeira Missão", description: "Conclua sua primeira missão com sucesso.", icon: "rocket" },
+  { key: "missions_10", name: "Operador Veternano", description: "Conclua 10 missões no ecossistema.", icon: "target" },
+  { key: "missions_50", name: "Mestre das Missões", description: "Conclua 50 missões no ecossistema.", icon: "crown" },
+  { key: "first_plugin", name: "Criador de Ferramentas", description: "Publique seu primeiro plugin no marketplace.", icon: "plug" },
+  { key: "first_review_received", name: "Reconhecimento", description: "Receba sua primeira avaliação de plugin.", icon: "star" },
+  { key: "reviews_5", name: "Autor Popular", description: "Receba avaliações em 5 plugins publicados.", icon: "award" },
+  { key: "chat_expert", name: "Conversador Ágil", description: "Envie 50 mensagens ao Chat.", icon: "message-square" },
+  { key: "memory_master", name: "Mestre da Memória", description: "Acumule 100 memórias no ecossistema.", icon: "database" },
+];
+
+export async function listUserAchievements(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(userAchievements).where(eq(userAchievements.userId, userId)).orderBy(desc(userAchievements.unlockedAt));
+}
+
+export async function unlockAchievement(userId: number, badgeKey: string) {
+  const db = await getDb();
+  if (!db) return false;
+  const existing = await db.select().from(userAchievements)
+    .where(and(eq(userAchievements.userId, userId), eq(userAchievements.badgeKey, badgeKey)))
+    .limit(1);
+  if (existing.length > 0) return false;
+  await db.insert(userAchievements).values({ userId, badgeKey });
+  return true;
+}
+
+// Evaluate and unlock achievements related to user activity; returns newly unlocked badge keys.
+export async function evaluateAchievements(userId: number): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const unlocked: string[] = [];
+  const tryUnlock = async (key: string, condition: () => Promise<boolean>) => {
+    if (unlocked.includes(key)) return;
+    if (await condition()) {
+      if (await unlockAchievement(userId, key)) unlocked.push(key);
+    }
+  };
+  // Missions completed
+  const completedMissions = await db.$count(missions, and(eq(missions.userId, userId), eq(missions.status, "completed")));
+  await tryUnlock("first_mission", async () => completedMissions >= 1);
+  await tryUnlock("missions_10", async () => completedMissions >= 10);
+  await tryUnlock("missions_50", async () => completedMissions >= 50);
+  // Published plugins with downloads
+  const myPlugins = await db.select().from(marketplacePlugins).where(eq(marketplacePlugins.authorId, userId));
+  await tryUnlock("first_plugin", async () => myPlugins.length >= 1);
+  await tryUnlock("reviews_5", async () => {
+    const myIds = myPlugins.map(p => p.id);
+    if (myIds.length < 5) return false;
+    const reviewedIds = await db.selectDistinct({ id: marketplaceReviews.pluginId }).from(marketplaceReviews).where(inArray(marketplaceReviews.pluginId, myIds));
+    return reviewedIds.length >= 5;
+  });
+  await tryUnlock("first_review_received", async () => {
+    if (myPlugins.length === 0) return false;
+    const myIds = myPlugins.map(p => p.id);
+    const cnt = await db.$count(marketplaceReviews, inArray(marketplaceReviews.pluginId, myIds));
+    return cnt >= 1;
+  });
+  // Memory count
+  const memoryCount = await db.$count(memory, eq(memory.userId, userId));
+  await tryUnlock("memory_master", async () => memoryCount >= 100);
+  return unlocked;
 }

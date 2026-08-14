@@ -20,6 +20,8 @@ import Chat from "./pages/Chat";
 import Marketplace from "./pages/Marketplace";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
+import { Notifications } from "./pages/Notifications";
+import { Achievements } from "./pages/Achievements";
 import NexusLayout from "./components/NexusLayout";
 
 function Router() {
@@ -42,6 +44,8 @@ function Router() {
         <Route path="/marketplace" component={Marketplace} />
         <Route path="/admin" component={Admin} />
         <Route path="/profile" component={Profile} />
+        <Route path="/notificacoes" component={Notifications} />
+        <Route path="/conquistas" component={Achievements} />
         <Route component={NotFound} />
       </Switch>
     </NexusLayout>
