@@ -268,7 +268,7 @@ const normalizeResponseFormat = ({
   };
 };
 
-const RETRY_MAX_RETRIES = 4;
+const RETRY_MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 30_000;
 
@@ -299,7 +299,7 @@ const computeBackoffDelay = (
 
 // Retries non-2xx responses and network errors with exponential backoff, then
 // returns the final Response so callers keep their existing error handling.
-const LLM_REQUEST_TIMEOUT_MS = 120_000;
+const LLM_REQUEST_TIMEOUT_MS = 30_000;
 
 // fetchWithTimeout wraps a fetch in an AbortController-based deadline so a
 // misbehaving upstream can never pin the agent loop forever.

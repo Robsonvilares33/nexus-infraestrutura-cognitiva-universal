@@ -179,7 +179,10 @@ export async function runAgentLoop(
         model,
         messages: contextWindow,
         tools: MEMORY_TOOLS,
-        tool_choice: "required",
+        // O endpoint de LLM não suporta tool_choice "required" (exige nome de ferramenta
+        // explícito ou "auto"). Com "auto" o modelo sempre escolhe uma ferramenta,
+        // pois o system prompt instrui que a resposta DEVE ser via tool call.
+        tool_choice: "auto",
       });
       message = response.choices[0].message as { role: string; content: unknown; tool_calls?: ToolCall[] };
     } catch (modelError) {
