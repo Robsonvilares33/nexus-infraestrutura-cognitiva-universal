@@ -286,6 +286,7 @@ export const appRouter = router({
     listScheduled: protectedProcedure.query(async ({ ctx }) => getScheduledMissions(ctx.user.id)),
 
     execute: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string() })).mutation(async ({ ctx, input }) => {
+      try {
       const userId = ctx.user.id;
       const missionId = input.missionId;
 
@@ -370,7 +371,7 @@ export const appRouter = router({
             { role: 'user', content: `Mission: ${input.input}\nTask: ${task.description}` },
           ],
         });
-        await addFeedEvent(userId, { eventType: 'result', message: `Agente ${task.agent}: tarefa concluída`, agentName: task.agent, missionId, confidence: 0.7 + Math.random() * 0.25 });
+        await addFeedEvent(userId, { eventType: 'result', message: `Agente ${task.agent}: tarefa concluída`, agentName: task.agent, missionId, confidence: Number((0.7 + Math.random() * 0.25).toFixed(3)) });
       }
 
       // 4. Synthesize result
@@ -382,7 +383,7 @@ export const appRouter = router({
         ],
       });
 
-      const confidence = 0.75 + Math.random() * 0.2;
+      const confidence = Number((0.75 + Math.random() * 0.2).toFixed(3));
       const resultText = typeof finalResult.choices[0].message.content === 'string'
         ? finalResult.choices[0].message.content
         : String(finalResult.choices[0].message.content);
@@ -411,6 +412,19 @@ export const appRouter = router({
       evaluateAchievements(userId).catch(() => {});
 
       return { interpretation: interp, tasks: plan.tasks, result: resultText, confidence };
+      } catch (error) {
+        // Never leave a mission stuck in EXECUTING — mark it failed and log the
+        // cause in the feed so the user can see what went wrong.
+        try {
+          await updateMission(ctx.user.id, input.missionId, { status: 'failed', completedAt: new Date() }).catch(() => {});
+          await addFeedEvent(ctx.user.id, {
+            eventType: 'error',
+            message: `Missão falhou durante a execução: ${String(error).slice(0, 400)}`,
+            missionId: input.missionId,
+          }).catch(() => {});
+        } catch { /* failure reporting must never throw */ }
+        throw error;
+      }
     }),
   }),
 
