@@ -31,6 +31,8 @@ import {
   createPluginVerification, getLatestPluginVerification,
   verifyPluginSource,
   type VerificationCheck,
+  createPluginThread, listPluginThreads, deletePluginThread,
+  awardXp, getXpLeaderboard, getMyXp,
   addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
   getWeeklyGrowthStats, getUserById,
 } from "./db";
@@ -178,7 +180,14 @@ export const appRouter = router({
       }),
     respondInvite: protectedProcedure
       .input(z.object({ collabId: z.number(), accept: z.boolean() }))
-      .mutation(async ({ ctx, input }) => respondToInvite(ctx.user.id, input.collabId, input.accept)),
+      .mutation(async ({ ctx, input }) => {
+        const result = await respondToInvite(ctx.user.id, input.collabId, input.accept);
+        // XP for accepting a collaboration
+        if (input.accept) {
+          try { await awardXp(ctx.user.id, "collab_accept"); } catch { /* never block invite response */ }
+        }
+        return result;
+      }),
     pendingInvites: protectedProcedure.query(async ({ ctx }) => listPendingInvites(ctx.user.id)),
     collaborations: protectedProcedure
       .input(z.object({ projectId: z.number() }))
@@ -376,6 +385,8 @@ export const appRouter = router({
       await addMemory(userId, { content: `Missão: ${input.input}\nResultado: ${resultText}`, confidence, origin: 'mission', tags: ['mission', 'result'] });
       await updateMission(userId, missionId, { status: 'completed', result: resultText, confidence, completedAt: new Date() });
       await addFeedEvent(userId, { eventType: 'complete', message: `Missão concluída — confiança: ${Math.round(confidence * 100)}%`, missionId, confidence });
+      // XP for completing a mission
+      try { await awardXp(userId, "mission_complete"); } catch { /* never block mission */ }
 
       // Trigger mission webhooks in background (fire-and-forget)
       fireMissionWebhooks(missionId, { input: input.input, result: resultText, confidence }).catch(() => {});
@@ -736,6 +747,8 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
             await createPluginVerification(pluginId, input.sourceCode ?? "", { name: input.name, version: input.version, category: input.category });
           }
         } catch { /* verification never blocks publish */ }
+        // XP for publishing a plugin
+        try { await awardXp(ctx.user.id, "plugin_publish"); } catch { /* never block publish */ }
         await evaluateAchievements(ctx.user.id);
         await addFeedEvent(ctx.user.id, {
           eventType: "agent",
@@ -804,6 +817,8 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
       }))
       .mutation(async ({ ctx, input }) => {
         await addMarketplaceReview(ctx.user.id, input.pluginId, input.rating, input.comment || "");
+        // XP for contributing a review
+        try { await awardXp(ctx.user.id, "review"); } catch { /* never block review */ }
         // Notify the plugin author (delivered to project owner, since the platform
         // notification channel targets the owner) about the new review
         try {
@@ -1012,6 +1027,37 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         await markAchievementsSeen(ctx.user.id, input.badgeKeys);
         return { success: true };
       }),
+  }),
+  // Phase 10: threaded plugin discussions (aninhadas via parentId)
+  threads: router({
+    list: publicProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .query(async ({ input }) => listPluginThreads(input.pluginId)),
+    create: protectedProcedure
+      .input(z.object({ pluginId: z.number(), content: z.string().min(1).max(2000), parentId: z.number().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const id = await createPluginThread(input.pluginId, ctx.user.id, input.content, input.parentId ?? null);
+        try {
+          const plugin = await getMarketplacePlugin(input.pluginId);
+          if (plugin) {
+            await addFeedEvent(ctx.user.id, {
+              eventType: "agent",
+              message: `[Marketplace] Discussão em "${plugin.name}": ${input.content.slice(0, 120)}`,
+              agentName: "Comunicação",
+              missionId: plugin.id,
+            });
+          }
+        } catch { /* feed never blocks discussion */ }
+        return { success: true, id };
+      }),
+    remove: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => ({ success: await deletePluginThread(input.id, ctx.user.id) })),
+  }),
+  // Phase 10: XP leaderboard for community contributions
+  leaderboard: router({
+    list: publicProcedure.query(async () => getXpLeaderboard()),
+    my: protectedProcedure.query(async ({ ctx }) => getMyXp(ctx.user.id)),
   }),
 });
 export type AppRouter = typeof appRouter;

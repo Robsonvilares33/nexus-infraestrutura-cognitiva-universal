@@ -75,6 +75,28 @@ export default function Marketplace() {
     { pluginId: detailId ?? 0 },
     { enabled: detailId !== null },
   );
+  // Phase 10: threaded plugin discussions
+  const { data: threads, isLoading: threadsLoading } = trpc.threads.list.useQuery(
+    { pluginId: detailId ?? 0 },
+    { enabled: detailId !== null },
+  );
+  const [threadContent, setThreadContent] = useState("");
+  const [threadReplyTo, setThreadReplyTo] = useState<number | null>(null);
+  const createThreadMutation = trpc.threads.create.useMutation({
+    onSuccess: () => {
+      toast.success("Discussão publicada!");
+      setThreadContent("");
+      setThreadReplyTo(null);
+      utils.threads.list.invalidate({ pluginId: detailId ?? 0 });
+    },
+    onError: (e) => toast.error(e.message || "Erro ao publicar discussão"),
+  });
+  const removeThreadMutation = trpc.threads.remove.useMutation({
+    onSuccess: () => {
+      toast.success("Discussão removida.");
+      utils.threads.list.invalidate({ pluginId: detailId ?? 0 });
+    },
+  });
   const addReviewMutation = trpc.marketplace.addReview.useMutation({
     onSuccess: () => {
       toast.success("Avaliação registrada!");
@@ -500,6 +522,95 @@ export default function Marketplace() {
                     {addReviewMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "AVALIAR"}
                   </Button>
                 </div>
+              </div>
+              {/* Phase 10: threaded discussion */}
+              <div className="space-y-1.5 pt-1 border-t border-[rgba(150,175,220,0.08)]">
+                <p className="text-[9px] font-mono text-[#7684a0] tracking-wider pt-2">DISCUSSÃO</p>
+                {threadsLoading ? (
+                  <p className="text-[10px] font-mono text-[#7684a0]">Carregando discussões…</p>
+                ) : !threads || threads.length === 0 ? (
+                  <p className="text-[10px] font-mono text-[#5a6580]">Nenhuma discussão ainda. Seja o primeiro a comentar!</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-auto">
+                    {threads
+                      .filter(t => t.parentId === null)
+                      .map(root => {
+                        const replies = threads.filter(t => t.parentId === root.id);
+                        return (
+                          <div key={root.id}>
+                            <div className="bg-[rgba(3,5,14,0.8)] border border-[rgba(150,175,220,0.1)] p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[8px] font-mono text-[#7684a0]">
+                                  {root.authorName ?? `Usuário #${root.authorId}`} · {new Date(root.createdAt).toLocaleDateString("pt-BR")}
+                                </span>
+                                {me && root.authorId === me.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeThreadMutation.mutate({ id: root.id })}
+                                    className="text-[#ff7a8c] hover:underline text-[8px] font-mono"
+                                  >
+                                    remover
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[10px] font-mono text-[#aab4d6] mt-0.5 whitespace-pre-wrap">{root.content}</p>
+                              <button
+                                type="button"
+                                onClick={() => setThreadReplyTo(threadReplyTo === root.id ? null : root.id)}
+                                className="text-[8px] font-mono text-[#7cf3ff]/80 hover:text-[#7cf3ff] mt-1"
+                              >
+                                {threadReplyTo === root.id ? "cancelar resposta" : "↩ responder"}
+                              </button>
+                            </div>
+                            {replies.map(reply => (
+                              <div key={reply.id} className="bg-[rgba(60,80,140,0.06)] border-l-2 border-[#7cf3ff]/30 ml-3 p-1.5 mt-1">
+                                <span className="text-[8px] font-mono text-[#7684a0]">
+                                  {reply.authorName ?? `Usuário #${reply.authorId}`} · {new Date(reply.createdAt).toLocaleDateString("pt-BR")}
+                                </span>
+                                <p className="text-[10px] font-mono text-[#aab4d6] mt-0.5 whitespace-pre-wrap">{reply.content}</p>
+                                {me && reply.authorId === me.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeThreadMutation.mutate({ id: reply.id })}
+                                    className="text-[#ff7a8c] hover:underline text-[8px] font-mono"
+                                  >
+                                    remover
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+                {me ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Textarea
+                      value={threadContent}
+                      onChange={e => setThreadContent(e.target.value)}
+                      placeholder={threadReplyTo ? "Escreva sua resposta…" : "Inicie uma discussão sobre este plugin…"}
+                      className="bg-[rgba(3,5,14,0.8)] border-[rgba(150,175,220,0.12)] text-[#e2e8f4] text-[10px] font-mono min-h-14"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (!detailId || !threadContent.trim()) return;
+                        createThreadMutation.mutate({
+                          pluginId: detailId,
+                          content: threadContent.trim(),
+                          parentId: threadReplyTo ?? undefined,
+                        });
+                      }}
+                      disabled={createThreadMutation.isPending || !threadContent.trim()}
+                      className="h-6 self-start text-[9px] font-mono bg-[#c9b8ff]/10 text-[#c9b8ff] border border-[#c9b8ff]/20 hover:bg-[#c9b8ff]/20"
+                    >
+                      {createThreadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : (threadReplyTo ? "RESPONDER" : "PUBLICAR")}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-[9px] font-mono text-[#5a6580]">Faça login para participar da discussão.</p>
+                )}
               </div>
               {detail.sourceCode && (
                 <div className="space-y-1">

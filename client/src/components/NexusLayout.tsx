@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
-  BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy,
+  BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy, Zap,
   LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -29,6 +29,7 @@ const NAV_ITEMS = [
   { path: "/profile", label: "Perfil", icon: UserCircle2 },
   { path: "/notificacoes", label: "Notificações", icon: Bell },
   { path: "/conquistas", label: "Conquistas", icon: Trophy },
+  { path: "/leaderboard", label: "Leaderboard", icon: Zap },
 ];
 
 const ADMIN_NAV_ITEMS = [

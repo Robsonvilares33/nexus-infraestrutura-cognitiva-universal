@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, sql, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
@@ -6,6 +6,7 @@ import {
   suggestedCategories,
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
+  pluginThreads, xpEvents,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -1226,4 +1227,105 @@ export async function markAchievementsSeen(userId: number, badgeKeys: string[]) 
     .set({ seenAt: new Date() })
     .where(and(eq(userAchievements.userId, userId), inArray(userAchievements.badgeKey, badgeKeys)));
   return badgeKeys.length;
+}
+
+// ─────────────────────────────────────────────
+// Phase 10: Threaded plugin discussions + XP leaderboard
+// ─────────────────────────────────────────────
+
+export type ThreadPost = {
+  id: number;
+  pluginId: number;
+  authorId: number;
+  parentId: number | null;
+  content: string;
+  createdAt: Date;
+  authorName?: string | null;
+};
+
+export async function createPluginThread(pluginId: number, authorId: number, content: string, parentId: number | null = null) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const [result] = await db.insert(pluginThreads).values({ pluginId, authorId, parentId, content });
+  return (result as any)?.insertId ?? (result as any)?.[0]?.insertId;
+}
+
+export async function listPluginThreads(pluginId: number): Promise<ThreadPost[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(pluginThreads).where(eq(pluginThreads.pluginId, pluginId));
+  const authorIds = Array.from(new Set(rows.map(r => r.authorId)));
+  const authorRows = authorIds.length > 0
+    ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, authorIds))
+    : [];
+  const authorMap = new Map(authorRows.map(a => [a.id, a.name]));
+  return rows.map(r => ({ ...r, authorName: authorMap.get(r.authorId) ?? null }));
+}
+
+export async function deletePluginThread(id: number, authorId: number) {
+  const db = await getDb();
+  if (!db) return false;
+  // Ownership check on the parent post itself (only its author may remove it and its replies)
+  const parent = await db.select({ authorId: pluginThreads.authorId }).from(pluginThreads).where(eq(pluginThreads.id, id)).limit(1);
+  if (parent.length === 0) return false;
+  if (parent[0].authorId !== authorId) return false;
+  // cascade: remove replies to this post too
+  const targets = await db.select({ id: pluginThreads.id }).from(pluginThreads).where(
+    or(eq(pluginThreads.id, id), eq(pluginThreads.parentId, id)),
+  );
+  if (targets.length === 0) return false;
+  const targetIds = targets.map(t => t.id);
+  await db.delete(pluginThreads).where(
+    and(inArray(pluginThreads.id, targetIds), eq(pluginThreads.authorId, authorId)),
+  );
+  return true;
+}
+
+export const XP_VALUES = { plugin_publish: 50, review: 10, mission_complete: 20, collab_accept: 5 } as const;
+
+export async function awardXp(userId: number, source: "plugin_publish" | "review" | "mission_complete" | "collab_accept") {
+  const db = await getDb();
+  if (!db) return;
+  const xp = XP_VALUES[source];
+  await db.insert(xpEvents).values({ userId, source, xp });
+}
+
+export async function getXpLeaderboard() {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      userId: xpEvents.userId,
+      totalXp: sql<number>`SUM(${xpEvents.xp})`,
+      contributions: sql<number>`COUNT(*)`,
+    })
+    .from(xpEvents)
+    .groupBy(xpEvents.userId)
+    .orderBy(desc(sql<number>`SUM(${xpEvents.xp})`))
+    .limit(20);
+  const userIds = rows.map(r => r.userId);
+  const userRows = userIds.length > 0
+    ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, userIds))
+    : [];
+  const nameMap = new Map(userRows.map(u => [u.id, u.name]));
+  return rows.map((r, i) => ({
+    rank: i + 1,
+    userId: r.userId,
+    name: nameMap.get(r.userId) ?? null,
+    totalXp: Number(r.totalXp ?? 0),
+    contributions: Number(r.contributions ?? 0),
+  }));
+}
+
+export async function getMyXp(userId: number) {
+  const db = await getDb();
+  if (!db) return { totalXp: 0, contributions: 0, rank: null };
+  const all = await getXpLeaderboard();
+  const mine = all.find(r => r.userId === userId);
+  const total = all.reduce((acc, r) => acc + Number(r.totalXp), 0);
+  return {
+    totalXp: mine?.totalXp ?? 0,
+    contributions: mine?.contributions ?? 0,
+    rank: mine?.rank ?? (all.length + 1),
+  };
 }
