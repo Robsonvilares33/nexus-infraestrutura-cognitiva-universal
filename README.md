@@ -4,6 +4,20 @@ Infraestrutura cognitiva universal: um ecossistema distribuido de inteligencias 
 
 > Esta copia combina o codigo da plataforma web completa (React 19 + tRPC + Express + Drizzle/MySQL + Socket.io + Three.js) com o executor local-first (SQLite + Ollama). Na nuvem, a plataforma roda sobre o ambiente Manus com autenticacao, banco e IA ja configurados. Abaixo estao as instrucoes para rodar localmente.
 
+## Funcionalidades incluidas
+
+| Modulo | Descricao |
+|---|---|
+| Universo 3D | Visualizacao fractal do ecossistema com Three.js |
+| Missoes | Orquestracao multiagente com streaming em tempo real (Socket.io) |
+| Memoria | Banco de memoria com busca semantica via LLM |
+| Marketplace | Plugins da comunidade com avaliacao, reviews, busca semantica e verificacao automatica de codigo |
+| Projetos compartilhados | Convidar colaboradores, chat ao vivo por projeto e missoes sincronizadas em tempo real |
+| Verificacao de plugins | 5 testes automaticos (credenciais expostas, sintaxe, exportacao, tamanho, fonte presente) |
+| Conquistas | Sistema de gamificacao com 8 badges e notificacoes |
+| E-mails reais | Integracao Resend para notificacoes por e-mail |
+| PWA | Instalavel no celular/desktop via service worker e manifest |
+
 ## Rodar localmente
 
 ```bash

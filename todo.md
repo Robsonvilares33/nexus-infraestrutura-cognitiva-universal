@@ -134,3 +134,13 @@
 - [x] achievements.markSeen procedure (seen state persistence + UI toast flow)
 - [x] evaluateAchievements on plugin publish (first_plugin)
 - [x] Vitest coverage for markSeen and publish-triggered unlock (41 tests passing)
+
+## Phase 9 — Colaboração em Tempo Real, Plugins Verificados, PWA
+- [x] projectCollaborations table (shared projects with role + mission visibility) + collaboration_messages for real-time discussion
+- [x] plugin_verifications table (automated validation: build/lint/syntax check results) + verification fields on marketplace_plugins
+- [x] Backend: collaborate invite/accept, shared feed socket room, verify plugin job (syntax + structural checks)
+- [x] PWA: manifest.json, service worker, icons, installable on mobile
+- [x] Frontend: Colaboração tab in Projetos (invite, accept, shared mission list, chat in shared project)
+- [x] Frontend: Selo "Verificado" in Marketplace cards/details with verification status
+- [x] Vitest coverage for collaboration + verification (48/48 tests passing) flows
+- [x] Screenshots verified, checkpoint + report

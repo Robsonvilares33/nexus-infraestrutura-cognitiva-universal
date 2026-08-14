@@ -225,3 +225,35 @@ export const suggestedCategories = mysqlTable("suggestedCategories", {
   isApproved: boolean("isApproved").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Phase 9: Real-time project collaboration — invite/accept shared projects with role and mission visibility
+export const projectCollaborations = mysqlTable("projectCollaborations", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull(),
+  invitedUserId: int("invitedUserId").notNull(),
+  invitedByUserId: int("invitedByUserId").notNull(),
+  role: mysqlEnum("role", ["member", "contributor"]).default("member").notNull(),
+  status: mysqlEnum("status", ["pending", "accepted", "declined", "removed"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  respondedAt: timestamp("respondedAt"),
+});
+
+// Real-time chat/discussion inside a shared project (live via socket)
+export const collaborationMessages = mysqlTable("collaborationMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull(),
+  userId: int("userId").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Phase 9: Automated plugin verification — structural/syntax validation with badge
+export const pluginVerifications = mysqlTable("pluginVerifications", {
+  id: int("id").autoincrement().primaryKey(),
+  pluginId: int("pluginId").notNull(),
+  status: mysqlEnum("status", ["pending", "verified", "failed"]).default("pending").notNull(),
+  checks: text("checks"), // JSON: list of check results {name, passed, note}
+  version: varchar("version", { length: 32 }),
+  checkedAt: timestamp("checkedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
