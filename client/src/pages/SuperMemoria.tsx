@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,8 +14,32 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
-  NotebookPen, Search, Plus, FolderOpen, Trash2, PencilLine, Loader2, Brain,
+  NotebookPen, Search, Plus, FolderOpen, Trash2, PencilLine, Loader2, Brain, FileText,
 } from "lucide-react";
+
+/** Pré-visualização no grid com links [[nota]] clicáveis */
+function GridPreview({ content, onOpen }: { content: string | null; onOpen: (title: string) => void }) {
+  const parts = String(content ?? "").split(/\[\[([^\]]{1,60})\]\]/g);
+  if (parts.length === 1) return <span>{content}</span>;
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 0 ? (
+          <span key={i}>{part}</span>
+        ) : (
+          <button
+            key={i}
+            type="button"
+            className="inline text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
+            onClick={() => onOpen(part)}
+          >
+            {part}
+          </button>
+        ),
+      )}
+    </>
+  );
+}
 
 type Note = {
   id: number;
@@ -45,6 +69,15 @@ export default function SuperMemoria() {
   const { data: notes, isLoading } = trpc.superNotes.list.useQuery(
     selectedFolder === "Todas" ? undefined : { folder: selectedFolder }
   );
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+
+  // Links [[nota]] disparam o evento global ao serem clicados no leitor de nota
+  useEffect(() => {
+    const handler = (e: Event) => openNoteByTitle((e as CustomEvent<string>).detail);
+    window.addEventListener("nexus-open-note", handler);
+    return () => window.removeEventListener("nexus-open-note", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes]);
   const { data: folders } = trpc.superNotes.folders.useQuery();
   const searchResult = trpc.superNotes.search.useQuery(
     { query },
@@ -79,7 +112,16 @@ export default function SuperMemoria() {
     setContent(note.content);
     setFolder(note.folder);
     try { setTags(JSON.parse(note.tags ?? "[]").join(", ")); } catch { setTags(""); }
+    setSelectedNote(null);
     setDialogOpen(true);
+  }
+
+  function openNote(note: Note) { setSelectedNote(note); }
+
+  function openNoteByTitle(rawTitle: string) {
+    const title = String(rawTitle ?? "").trim();
+    const target = [...(notes ?? [])].find((n) => n.title.toLowerCase() === title.toLowerCase()) ?? null;
+    if (target) { setSelectedNote(target); } else { toast.info(`Nota "${title}" ainda não existe — crie-a para completar o link.`); }
   }
 
   function submit() {
@@ -111,7 +153,7 @@ export default function SuperMemoria() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input className="pl-9" placeholder="Buscar na memória..." value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
-        <Select value={selectedFolder} onValueChange={(v) => { setSelectedFolder(v); setQuery(""); }}>
+        <Select value={selectedFolder} onValueChange={(v) => { setSelectedFolder(v); setQuery(""); setSelectedNote(null); }}>
           <SelectTrigger className="w-44">
             <SelectValue />
           </SelectTrigger>
@@ -182,7 +224,12 @@ export default function SuperMemoria() {
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap line-clamp-4 font-mono bg-background/60 p-2 rounded">
-                    {note.content}
+                    <GridPreview content={note.content} onOpen={(t) => {
+                      const all = notes ?? [];
+                      const target = [...all].find((n) => n.title.toLowerCase() === String(t).trim().toLowerCase()) ?? null;
+                      if (target) openNote(target);
+                      else toast.info(`Nota "${t}" ainda não existe — crie-a para completar o link.`);
+                    }} />
                   </p>
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                     {note.tags?.replace(/[\[\]"]/g, "").split(",").filter(Boolean).map((t) => (
@@ -191,10 +238,22 @@ export default function SuperMemoria() {
                     <span className="text-xs text-muted-foreground">
                       atualizada em {new Date(note.updatedAt).toLocaleString()}
                     </span>
+                    {(note.content ?? "").includes("[[") && (
+                      <button
+                        type="button"
+                        className="text-xs text-cyan-400 hover:text-cyan-300 underline-offset-2 hover:underline"
+                        onClick={() => openNote(note)}
+                      >
+                        abrir nota (links [[ ]])
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" onClick={() => openEdit(note)}>
+                  <Button variant="ghost" size="icon" onClick={() => openNote(note)} title="Abrir nota">
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => openEdit(note)} title="Editar">
                     <PencilLine className="h-4 w-4" />
                   </Button>
                   <Button variant="ghost" size="icon" className="text-destructive" onClick={() => {
@@ -208,6 +267,52 @@ export default function SuperMemoria() {
           ))}
         </div>
       )}
+
+      {/* Leitor de nota — resolve links [[nota]] clicando nelas */}
+      {selectedNote && (
+        <Card className="fixed inset-x-4 bottom-4 md:inset-x-auto md:right-4 md:w-[520px] p-5 border-cyan-400/50 shadow-2xl max-h-[60vh] overflow-y-auto z-40 bg-[#0a0f1c]">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <h2 className="font-semibold text-lg">{selectedNote.title}</h2>
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setSelectedNote(null)}>✕</Button>
+          </div>
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <Badge variant="outline" className="text-xs border-muted-foreground/40"><FolderOpen className="h-3 w-3 mr-1" />{selectedNote.folder}</Badge>
+            {selectedNote.tags?.replace(/[\[\]"]/g, "").split(",").filter(Boolean).map((t) => (
+              <span key={t} className="text-xs text-cyan-300">#{t.trim()}</span>
+            ))}
+          </div>
+          <pre className="whitespace-pre-wrap font-mono text-sm bg-background/60 p-3 rounded leading-relaxed">
+            {renderWithLinks(selectedNote.content)}
+          </pre>
+          <div className="mt-3 text-xs text-muted-foreground">
+            atualizada em {new Date(selectedNote.updatedAt).toLocaleString()}
+          </div>
+        </Card>
+      )}
     </div>
+  );
+}
+
+/** Renderiza o conteúdo com links [[Nota]] resolvidos em botões clicáveis que navegam para a nota alvo. */
+function renderWithLinks(content: string) {
+  const parts = String(content ?? "").split(/\[\[([^\]]{1,60})\]\]/g);
+  if (parts.length === 1) return content;
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 0 ? (
+          <span key={i}>{part}</span>
+        ) : (
+          <button
+            key={i}
+            type="button"
+            className="inline text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
+            onClick={() => window.dispatchEvent(new CustomEvent("nexus-open-note", { detail: part }))}
+          >
+            {part}
+          </button>
+        ),
+      )}
+    </>
   );
 }
