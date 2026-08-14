@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  Plug, Search, Plus, Heart, Download, ExternalLink, Github, Trash2,
+  Plug, Search, Plus, Heart, Download, ExternalLink, Github, Trash2, Zap,
   Package, Loader2, Star, Sparkles, SpellCheck, ShieldCheck, ShieldX,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function Marketplace() {
+  const [, navigate] = useLocation();
   const [query, setQuery] = useState("");
   const [semantic, setSemantic] = useState(false);
   const [category, setCategory] = useState("all");
@@ -75,6 +77,16 @@ export default function Marketplace() {
     { pluginId: detailId ?? 0 },
     { enabled: detailId !== null },
   );
+  // Phase 11: mission templates
+  const { data: templates, isLoading: templatesLoading } = trpc.templates.list.useQuery();
+  const createMissionMutation = trpc.missions.create.useMutation({
+    onSuccess: () => {
+      toast.success("Missão criada a partir do template! Acompanhe em Minha IA.");
+      utils.missions.list.invalidate();
+    },
+    onError: (e) => toast.error(e.message || "Erro ao criar missão"),
+  });
+
   // Phase 10: threaded plugin discussions
   const { data: threads, isLoading: threadsLoading } = trpc.threads.list.useQuery(
     { pluginId: detailId ?? 0 },
@@ -283,6 +295,52 @@ export default function Marketplace() {
             </div>
           </DialogContent>
         </Dialog>
+      </div>
+
+      {/* Phase 11: mission templates */}
+      <div>
+        <div className="flex items-center gap-2 mb-2.5">
+          <Zap className="h-4 w-4 text-[#ffd479]" />
+          <h3 className="text-sm font-semibold text-[#e2e8f4]">Templates de Missão</h3>
+          <span className="text-[10px] font-mono text-[#7684a0]">· modelos prontos para adaptar com um clique</span>
+        </div>
+        {templatesLoading ? (
+          <div className="h-24 animate-pulse nexus-card" />
+        ) : !templates?.length ? (
+          <p className="nexus-card p-4 text-[10px] font-mono text-[#7684a0]">Nenhum template ainda. Execute universe.seed no painel de Admin para carregar os templates padrão.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {templates.map(t => (
+              <div key={t.id} className="nexus-card p-3.5 flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold text-[#e2e8f4]">{t.title}</p>
+                    <span className="text-[8px] font-mono text-[#ffd479] border border-[rgba(255,212,121,0.2)] px-1 py-0.5 rounded">
+                      {t.category.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[10px] font-mono text-[#7684a0] line-clamp-2">{t.description}</p>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    // Phase 11: prefill Minha IA mission input instead of executing immediately
+                    try {
+                      localStorage.setItem("nexus-template-input", t.suggestedInput);
+                    } catch {
+                      /* storage unavailable */
+                    }
+                    navigate("/minha-ia");
+                  }}
+                  className="mt-auto bg-[#ffd479]/10 text-[#ffd479] border border-[#ffd479]/20 hover:bg-[#ffd479]/20 font-mono text-[10px] self-start"
+                >
+                  <Zap className="h-3 w-3 mr-1.5" />
+                  USAR TEMPLATE
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Filters */}

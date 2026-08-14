@@ -1,6 +1,6 @@
 import { Server as HTTPServer } from "http";
 import { Server } from "socket.io";
-import { getDb } from "./db";
+import { getDb, setNotificationPushCallback } from "./db";
 
 // In-memory map: userId -> socket ids
 const userSockets = new Map<string, Set<string>>();
@@ -123,5 +123,19 @@ export function broadcastProjectMissionUpdate(projectId: number, missionId: numb
     _io.to(`project:${projectId}`).emit("project:missionUpdate", { projectId, missionId, status, ...data, timestamp: Date.now() });
   }
 }
+
+// Phase 11: push in-app notification to the user's connected sockets in real time
+export function broadcastNotificationPush(userId: string, notification: {
+  id?: number; type: string; title: string; content?: string | null; createdAt?: Date;
+}) {
+  if (_io) {
+    _io.to(`user:${userId}`).emit("notification:push", { ...notification, timestamp: Date.now() });
+  }
+}
+
+// Registered as the insert callback in db.ts (avoids circular import)
+setNotificationPushCallback((userId, { type, title, content }) => {
+  broadcastNotificationPush(userId, { type, title, content, createdAt: new Date() });
+});
 
 export { userSockets };

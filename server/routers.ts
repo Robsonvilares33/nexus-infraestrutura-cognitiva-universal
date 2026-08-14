@@ -33,13 +33,17 @@ import {
   type VerificationCheck,
   createPluginThread, listPluginThreads, deletePluginThread,
   awardXp, getXpLeaderboard, getMyXp,
+  getReputation, REPUTATION_LEVELS,
+  createMissionTemplate, listMissionTemplates, removeMissionTemplate,
   addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
   getWeeklyGrowthStats, getUserById,
+  seedMissionTemplates,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
 import { sql, eq, and, inArray } from "drizzle-orm";
 import { getDb } from "./db";
+import { broadcastNotificationPush } from "./socket";
 import { memory, marketplaceReviews, missions, marketplacePlugins } from "../drizzle/schema";
 import { ACHIEVEMENTS } from "./db";
 
@@ -67,6 +71,7 @@ export const appRouter = router({
       await seedPlugins(ctx.user.id);
       await seedModels(ctx.user.id);
       await seedAgents(ctx.user.id);
+      await seedMissionTemplates();
       return { success: true };
     }),
   }),
@@ -1058,6 +1063,38 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
   leaderboard: router({
     list: publicProcedure.query(async () => getXpLeaderboard()),
     my: protectedProcedure.query(async ({ ctx }) => getMyXp(ctx.user.id)),
+  }),
+  // Phase 11: reputation level from accumulated XP
+  reputation: router({
+    me: protectedProcedure.query(async ({ ctx }) => getReputation(ctx.user.id)),
+    levels: publicProcedure.query(async () => REPUTATION_LEVELS),
+  }),
+  // Phase 11: mission templates — ready-made mission blueprints
+  templates: router({
+    list: publicProcedure.query(async () => listMissionTemplates()),
+    create: protectedProcedure
+      .input(z.object({
+        title: z.string().min(1).max(255),
+        description: z.string().min(1),
+        suggestedInput: z.string().min(1),
+        agents: z.string().max(255).optional(),
+        category: z.string().max(64).optional(),
+        icon: z.string().max(32).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const id = await createMissionTemplate({
+          title: input.title,
+          description: input.description,
+          suggestedInput: input.suggestedInput,
+          agents: input.agents ?? "",
+          category: input.category ?? "geral",
+          icon: input.icon ?? "Zap",
+        });
+        return { success: true, id };
+      }),
+    remove: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => ({ success: await removeMissionTemplate(input.id) })),
   }),
 });
 export type AppRouter = typeof appRouter;
