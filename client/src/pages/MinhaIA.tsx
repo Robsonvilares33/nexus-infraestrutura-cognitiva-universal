@@ -108,8 +108,9 @@ export default function MinhaIA() {
   const handleSubmit = async () => {
     if (!input.trim()) return;
     setLiveEvents([]);
-    const result = await createMutation.mutateAsync({ input: input.trim() });
-    const mid = (result as any)?.insertId;
+    const result = (await createMutation.mutateAsync({ input: input.trim() })) as any;
+    const mid = result?.insertId ?? result?.[0]?.insertId;
+    if (!mid) throw new Error("Falha ao criar a missão: id não retornado.");
     // Add initial event immediately
     setLiveEvents(prev => [...prev, {
       eventType: "mission",

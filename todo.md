@@ -165,7 +165,7 @@
 - [x] Limpeza de dados de teste vitest (plugins, notificações, xp_events, threads, reviews, colaborações, projetos, missões)
 - [x] README.md atualizado com Reputação, Notificações em tempo real, Templates de Missão e Indicador de conexão
 
-## Phase 12 (sugestões futuras)
+## Backlog de sugestões futuras (aguardando aprovação do usuário)
 - [ ] Streaming real do feed cognitivo para execução de missões agendadas
 - [ ] Busca semântica vetorial (embeddings) na Memória
 - [ ] Compartilhamento de missões entre usuários (exportar/importar)
@@ -173,3 +173,11 @@
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
 - [x] Sincronização final com o GitHub (commit a5279bd)
+
+## Auditoria solicitada (14/08)
+- [x] Verificar sincronização completa com o GitHub (arquivos, commits) — 190/191 arquivos locais no remote; único ausente é .session-notes.md (intencional, contém credenciais)
+- [ ] Teste de estresse como usuário: fluxo completo de missão
+- [ ] Teste de estresse como usuário: plugins, agentes, modelos, memória, universo 3D
+- [ ] Teste de estresse como usuário: marketplace, templates, threads, XP
+- [ ] Teste de estresse como usuário: projetos/colaboração, notificações, conquistas, admin
+- [ ] Relatório de avaliação + guia de uso + possibilidades
