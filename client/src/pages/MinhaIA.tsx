@@ -109,13 +109,33 @@ export default function MinhaIA() {
   const { data: missions, refetch: refetchMissions } = trpc.missions.list.useQuery();
   const { data: feed } = trpc.feed.list.useQuery({ limit: 50 });
   const createMutation = trpc.missions.create.useMutation();
-  const executeMutation = trpc.missions.execute.useMutation();
+  const executeMutation = trpc.missions.execute.useMutation({
+    onMutate: () => {
+      // Fase 13 — Modo Agente: abre o console SOMENTE depois que o request
+      // foi enfileirado pelo cliente tRPC — evita que o EventSource/polling
+      // abra antes do POST e interrompa o envio do batch.
+      setAgentMissionId(agentExecuteMissionIdRef.current);
+    },
+    onError: e => {
+      const msg = e?.message || String(e);
+      if (/aborted|abort/i.test(msg)) {
+        toast.warning("A conexão com o servidor foi interrompida — a missão pode continuar em segundo plano. Acompanhe no feed.");
+      } else {
+        toast.error(`Falha na execução da missão: ${msg}`);
+      }
+      setAgentMissionId(null);
+    },
+    onSettled: () => refetchMissions(),
+  });
   const scheduleMutation = trpc.missions.schedule.useMutation();
   const unscheduleMutation = trpc.missions.unschedule.useMutation();
   const { data: scheduledMissions, refetch: refetchScheduled } = trpc.missions.listScheduled.useQuery();
   const [input, setInput] = useState("");
   const [agentMode, setAgentMode] = useState(false);
   const [agentMissionId, setAgentMissionId] = useState<number | null>(null);
+  // Ref para transportar o missionId do modo agente até o onMutate do
+  // executeMutation (criado no escopo do componente, antes de handleSubmit).
+  const agentExecuteMissionIdRef = useRef<number | null>(null);
   const agentStream = useAgentStream(agentMissionId, agentMode);
   const [hookMissionId, setHookMissionId] = useState<number | null>(null);
   const [hookUrl, setHookUrl] = useState("");
@@ -208,20 +228,12 @@ export default function MinhaIA() {
       createdAt: new Date(),
     }]);
     if (agentMode) {
-      // Fase 13 — Modo Agente: loop autônomo com console ao vivo
-      setAgentMissionId(mid);
-      executeMutation
-        .mutateAsync({ missionId: mid, input: input.trim(), mode: "agent" })
-        .then(res => {
-          if ((res as any)?.result) {
-            toast.success(`Missão concluída no Modo Agente — confiança ${Math.round((res as any).confidence * 100)}%`);
-          }
-        })
-        .catch(e => toast.error(`Falha no Modo Agente: ${e?.message || String(e)}`))
-        .finally(() => {
-          setAgentMissionId(null);
-          refetchMissions();
-        });
+      // Fase 13 — Modo Agente: loop autônomo com console ao vivo.
+      // O request de execução roda em background; o console abre em seguida
+      // e acompanha os passos via SSE/polling. Um abort aqui é tratado como
+      // falha visível em vez de silencioso.
+      agentExecuteMissionIdRef.current = mid;
+      executeMutation.mutate({ missionId: mid, input: input.trim(), mode: "agent" });
     } else {
       await executeMutation.mutateAsync({ missionId: mid, input: input.trim() });
     }
@@ -307,24 +319,29 @@ export default function MinhaIA() {
             <span className="text-[9px] font-mono text-[#7684a0]">(loop autônomo NEXUS × Manus — console ao vivo)</span>
           </label>
         </div>
-        <div className="flex gap-3">
+        <form
+          className="flex gap-3"
+          onSubmit={e => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+        >
           <input
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleSubmit()}
             placeholder="Descreva sua missão em linguagem natural..."
             className="flex-1 nexus-card px-4 py-3 text-sm text-[#e2e8f4] placeholder:text-[#7684a0]/50 focus:outline-none focus:border-[#7cf3ff]/30 font-mono bg-transparent"
           />
           <button
-            onClick={handleSubmit}
+            type="submit"
             disabled={!input.trim() || createMutation.isPending || executeMutation.isPending}
             className="nexus-card px-6 py-3 text-[#7cf3ff] hover:bg-[#7cf3ff]/10 disabled:opacity-30 font-mono text-xs flex items-center gap-2"
           >
             <Send className="h-4 w-4" />
             EXECUTAR
           </button>
-        </div>
+        </form>
       </div>
 
       {/* Fase 13 — Console do Agente (streaming SSE + fallback polling) */}

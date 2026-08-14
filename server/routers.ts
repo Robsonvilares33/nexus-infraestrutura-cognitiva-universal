@@ -303,7 +303,7 @@ export const appRouter = router({
           try { await awardXp(userId, "mission_complete"); } catch { /* never block */ }
           fireMissionWebhooks(missionId, { input: input.input, result: loopResult.result, confidence: loopResult.confidence }).catch(() => {});
           evaluateAchievements(userId).catch(() => {});
-          return { interpretation: loopResult.interpretation, tasks: [], result: loopResult.result, confidence: loopResult.confidence, steps: loopResult.steps };
+          return { interpretation: loopResult.interpretation, tasks: [], result: loopResult.result, confidence: loopResult.confidence };
         } catch (error) {
           try {
             await updateMission(userId, missionId, { status: "failed", completedAt: new Date() }).catch(() => {});
