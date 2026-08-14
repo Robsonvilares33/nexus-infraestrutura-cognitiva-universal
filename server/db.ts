@@ -5,6 +5,7 @@ import {
   projectShares, marketplacePlugins, marketplaceReviews, marketplaceInstalls,
   suggestedCategories,
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
+  projectCollaborations, collaborationMessages, pluginVerifications,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -742,6 +743,169 @@ export async function getUserSharedProjects(userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(projectShares).where(eq(projectShares.sharedByUserId, userId)).orderBy(desc(projectShares.createdAt));
+}
+
+// ---------- Phase 9: Project collaboration (real-time shared missions) ----------
+export async function getCollaborators(projectId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const collabs = await db.select().from(projectCollaborations).where(eq(projectCollaborations.projectId, projectId));
+  const userRows = await Promise.all(collabs.map(c => getUserById(c.invitedUserId)));
+  return collabs.map((c, i) => ({ ...c, collaboratorName: userRows[i]?.name ?? null, collaboratorEmail: userRows[i]?.email ?? null }));
+}
+
+export async function inviteCollaborator(invitedByUserId: number, projectId: number, invitedUserId: number, role: "member" | "contributor" = "member") {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const project = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  if (project.length === 0 || project[0].userId !== invitedByUserId) throw new Error("Projeto não encontrado ou não pertence a você");
+  if (invitedUserId === invitedByUserId) throw new Error("Você não pode convidar a si mesmo");
+  const existing = await db.select().from(projectCollaborations)
+    .where(and(eq(projectCollaborations.projectId, projectId), eq(projectCollaborations.invitedUserId, invitedUserId)))
+    .limit(1);
+  if (existing.length > 0 && existing[0].status !== "declined" && existing[0].status !== "removed") {
+    throw new Error("Convite já existe para este usuário");
+  }
+  if (existing.length > 0) {
+    return db.update(projectCollaborations)
+      .set({ status: "pending", role, invitedByUserId, createdAt: new Date(), respondedAt: null })
+      .where(eq(projectCollaborations.id, existing[0].id));
+  }
+  return db.insert(projectCollaborations).values({ projectId, invitedUserId, invitedByUserId, role, status: "pending" });
+}
+
+export async function respondToInvite(userId: number, collabId: number, accept: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const collab = await db.select().from(projectCollaborations).where(eq(projectCollaborations.id, collabId)).limit(1);
+  if (collab.length === 0) throw new Error("Convite não encontrado");
+  if (collab[0].invitedUserId !== userId) throw new Error("Convite não pertence a você");
+  await db.update(projectCollaborations)
+    .set({ status: accept ? "accepted" : "declined", respondedAt: new Date() })
+    .where(eq(projectCollaborations.id, collabId));
+  if (accept) {
+    const project = await db.select().from(projects).where(eq(projects.id, collab[0].projectId)).limit(1);
+    if (project[0]) {
+      await addInAppNotification(project[0].userId, "collab", "Convite aceito", `Um colaborador aceitou participar do seu projeto: ${project[0].name}`);
+    }
+  }
+  return { accepted: accept };
+}
+
+export async function listPendingInvites(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const collabs = await db.select().from(projectCollaborations)
+    .where(and(eq(projectCollaborations.invitedUserId, userId), eq(projectCollaborations.status, "pending")))
+    .orderBy(desc(projectCollaborations.createdAt));
+  const out = [];
+  for (const c of collabs) {
+    const project = await db.select().from(projects).where(eq(projects.id, c.projectId)).limit(1);
+    const inviter = await getUserById(c.invitedByUserId);
+    out.push({ ...c, projectName: project[0]?.name ?? null, inviterName: inviter?.name ?? null });
+  }
+  return out;
+}
+
+export async function listProjectCollaborations(projectId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const collabs = await db.select().from(projectCollaborations).where(eq(projectCollaborations.projectId, projectId));
+  const out = [];
+  for (const c of collabs) {
+    const user = await getUserById(c.invitedUserId);
+    out.push({ ...c, collaboratorName: user?.name ?? null, collaboratorEmail: user?.email ?? null });
+  }
+  return out;
+}
+
+export async function getCollaborationMessageHistory(projectId: number, limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(collaborationMessages)
+    .where(eq(collaborationMessages.projectId, projectId))
+    .orderBy(asc(collaborationMessages.createdAt))
+    .limit(limit);
+  const out = [];
+  for (const m of rows) {
+    const user = await getUserById(m.userId);
+    out.push({ ...m, userName: user?.name ?? null });
+  }
+  return out;
+}
+
+export async function addCollaborationMessage(projectId: number, userId: number, content: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(collaborationMessages).values({ projectId, userId, content });
+  const row = await db.select().from(collaborationMessages).where(eq(collaborationMessages.projectId, projectId)).orderBy(desc(collaborationMessages.id)).limit(1);
+  const user = await getUserById(userId);
+  return row.length > 0 ? { ...row[0], userName: user?.name ?? null } : null;
+}
+
+export async function removeCollaborator(userId: number, projectId: number, targetUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const project = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  if (project.length === 0 || project[0].userId !== userId) throw new Error("Projeto não encontrado ou não pertence a você");
+  return db.delete(projectCollaborations)
+    .where(and(eq(projectCollaborations.projectId, projectId), eq(projectCollaborations.invitedUserId, targetUserId)));
+}
+
+// ---------- Phase 9: Automated plugin verification ----------
+export type VerificationCheck = { name: string; passed: boolean; note?: string };
+
+export function verifyPluginSource(sourceCode: string, meta: { name: string; version?: string; category: string }): { status: "verified" | "failed"; checks: VerificationCheck[] } {
+  const checks: VerificationCheck[] = [];
+  // 1. Non-empty source
+  const hasSource = (sourceCode || "").trim().length > 0;
+  checks.push({ name: "Código fonte presente", passed: hasSource, note: hasSource ? undefined : "O plugin foi publicado sem código fonte" });
+  // 2. No hard-coded secret patterns
+  const hasSecret = /((ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}|(re_[A-Za-z0-9_]{24,})|sk-[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_\-]{30,})/.test(sourceCode || "");
+  checks.push({ name: "Sem credenciais expostas", passed: !hasSecret, note: hasSecret ? "Credencial detectada no código — remova antes de publicar" : undefined });
+  // 3. Balanced braces (basic syntax sanity)
+  const braces = (sourceCode || "").split("").reduce((acc, ch) => {
+    if (ch === "{") acc.open++;
+    if (ch === "}") acc.close++;
+    if (ch === "(") acc.parenOpen++;
+    if (ch === ")") acc.parenClose++;
+    return acc;
+  }, { open: 0, close: 0, parenOpen: 0, parenClose: 0 });
+  const balanced = braces.open === braces.close && braces.parenOpen === braces.parenClose;
+  checks.push({ name: "Sintaxe estrutural", passed: balanced, note: balanced ? undefined : "Chaves ou parênteses desbalanceados" });
+  // 4. Export signature (plugin exposes a name/handler)
+  const hasExport = /(export\s+(default|const|function|class)\s|module\.exports)/i.test(sourceCode || "");
+  checks.push({ name: "Exportação detectada", passed: hasExport, note: hasExport ? undefined : "Nenhum export ou module.exports encontrado" });
+  // 5. Reasonable size (< 200KB source)
+  const sizeOk = (sourceCode || "").length < 200 * 1024;
+  checks.push({ name: "Tamanho adequado", passed: sizeOk, note: sizeOk ? undefined : "Código fonte excede 200KB" });
+  const status = checks.every(c => c.passed) ? "verified" : "failed";
+  return { status, checks };
+}
+
+export async function createPluginVerification(pluginId: number, sourceCode: string, meta: { name: string; version?: string; category: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const { status, checks } = verifyPluginSource(sourceCode, meta);
+  await db.delete(pluginVerifications).where(eq(pluginVerifications.pluginId, pluginId));
+  await db.insert(pluginVerifications).values({
+    pluginId,
+    status,
+    checks: JSON.stringify(checks),
+    version: meta.version,
+    checkedAt: new Date(),
+  });
+  return { status, checks };
+}
+
+export async function getLatestPluginVerification(pluginId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(pluginVerifications)
+    .where(eq(pluginVerifications.pluginId, pluginId))
+    .orderBy(desc(pluginVerifications.createdAt))
+    .limit(1);
+  return rows.length > 0 ? rows[0] : null;
 }
 
 // ---------- Mission webhooks ----------
