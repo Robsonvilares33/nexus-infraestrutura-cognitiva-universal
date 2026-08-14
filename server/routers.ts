@@ -26,6 +26,11 @@ import {
   addInAppNotification, markNotificationRead, markAllNotificationsRead, listUserNotifications, countUnreadNotifications,
   sendEmail, evaluateAchievements, listUserAchievements, markAchievementsSeen,
   searchMarketplacePluginsByTerms,
+  inviteCollaborator, respondToInvite, listPendingInvites, listProjectCollaborations,
+  getCollaborationMessageHistory, addCollaborationMessage, removeCollaborator,
+  createPluginVerification, getLatestPluginVerification,
+  verifyPluginSource,
+  type VerificationCheck,
   addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
   getWeeklyGrowthStats, getUserById,
 } from "./db";
@@ -159,6 +164,43 @@ export const appRouter = router({
         } catch {
           return [];
         }
+      }),
+    // Phase 9: real-time project collaboration
+    inviteCollaborator: protectedProcedure
+      .input(z.object({ projectId: z.number(), invitedUserId: z.number(), role: z.enum(["member", "contributor"]).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await inviteCollaborator(ctx.user.id, input.projectId, input.invitedUserId, input.role || "member");
+        try {
+          const { addInAppNotification: addNotif } = await import("./db");
+          await addNotif(input.invitedUserId, "collab", "Convite de colaboração", "Você foi convidado a colaborar em um projeto no NEXUS.");
+        } catch { /* optional */ }
+        return { success: true };
+      }),
+    respondInvite: protectedProcedure
+      .input(z.object({ collabId: z.number(), accept: z.boolean() }))
+      .mutation(async ({ ctx, input }) => respondToInvite(ctx.user.id, input.collabId, input.accept)),
+    pendingInvites: protectedProcedure.query(async ({ ctx }) => listPendingInvites(ctx.user.id)),
+    collaborations: protectedProcedure
+      .input(z.object({ projectId: z.number() }))
+      .query(async ({ ctx, input }) => listProjectCollaborations(input.projectId)),
+    collabMessages: protectedProcedure
+      .input(z.object({ projectId: z.number() }))
+      .query(async ({ ctx, input }) => getCollaborationMessageHistory(input.projectId)),
+    sendCollabMessage: protectedProcedure
+      .input(z.object({ projectId: z.number(), content: z.string().min(1).max(2000) }))
+      .mutation(async ({ ctx, input }) => {
+        const row = await addCollaborationMessage(input.projectId, ctx.user.id, input.content);
+        try {
+          const { broadcastProjectMessage } = await import("./socket");
+          if (row) broadcastProjectMessage(input.projectId, { id: row.id, userId: row.userId, userName: row.userName ?? null, content: row.content, createdAt: row.createdAt });
+        } catch { /* socket optional */ }
+        return row;
+      }),
+    removeCollaborator: protectedProcedure
+      .input(z.object({ projectId: z.number(), targetUserId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await removeCollaborator(ctx.user.id, input.projectId, input.targetUserId);
+        return { success: true };
       }),
   }),
 
@@ -686,7 +728,14 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         version: z.string().max(32).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        await addMarketplacePlugin(ctx.user.id, input);
+        const result = await addMarketplacePlugin(ctx.user.id, input);
+        // Automated verification run (runs right after publish; visible on the plugin card)
+        try {
+          const pluginId = result && typeof result === "object" && "insertId" in result ? Number(result.insertId) : undefined;
+          if (pluginId && Number.isFinite(pluginId) && pluginId > 0) {
+            await createPluginVerification(pluginId, input.sourceCode ?? "", { name: input.name, version: input.version, category: input.category });
+          }
+        } catch { /* verification never blocks publish */ }
         await evaluateAchievements(ctx.user.id);
         await addFeedEvent(ctx.user.id, {
           eventType: "agent",
@@ -694,6 +743,38 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
           agentName: "Sincronia",
         });
         return { success: true };
+      }),
+    verify: protectedProcedure
+      .input(z.object({
+        pluginId: z.number(),
+        sourceCode: z.string().optional(),
+        name: z.string().min(1).max(128),
+        version: z.string().max(32).optional(),
+        category: z.enum(["model", "infra", "device", "utility"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Author or anyone (public validation tool); requires source to verify
+        const status = await createPluginVerification(input.pluginId, input.sourceCode ?? "", { name: input.name, version: input.version, category: input.category });
+        return status;
+      }),
+    verification: protectedProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .query(async ({ input }) => {
+        const row = await getLatestPluginVerification(input.pluginId);
+        if (!row) return { status: "pending", checks: [] as VerificationCheck[], verified: false };
+        let checks: VerificationCheck[] = [];
+        try { checks = row.checks ? JSON.parse(row.checks) : []; } catch { /* keep empty */ }
+        return { status: row.status, checks, verified: row.status === "verified" };
+      }),
+    // Collaborators may view verification of any plugin in the marketplace
+    verificationPublic: publicProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .query(async ({ input }) => {
+        const row = await getLatestPluginVerification(input.pluginId);
+        if (!row) return { status: "pending", checks: [] as VerificationCheck[], verified: false };
+        let checks: VerificationCheck[] = [];
+        try { checks = row.checks ? JSON.parse(row.checks) : []; } catch { /* keep empty */ }
+        return { status: row.status, checks, verified: row.status === "verified" };
       }),
     upvote: protectedProcedure
       .input(z.object({ pluginId: z.number() }))

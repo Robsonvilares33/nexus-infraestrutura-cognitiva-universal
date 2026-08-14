@@ -72,6 +72,15 @@ const trpcClient = trpc.createClient({
   ],
 });
 
+// Register service worker for PWA support (app installable on mobile/desktop)
+if ("serviceWorker" in navigator && window.isSecureContext === true) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // Non-fatal: app works fine without SW
+    });
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>

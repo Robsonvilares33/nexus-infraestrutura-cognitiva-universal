@@ -1,0 +1,25 @@
+{
+  "name": "NEXUS — Plataforma Cognitiva Universal",
+  "short_name": "NEXUS",
+  "description": "Infraestrutura Cognitiva Universal que transforma missões em realidade através de um ecossistema distribuído de inteligências artificiais.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#05070f",
+  "theme_color": "#0a0f1e",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgZmlsbD0iIzA1MDcwZiIvPjxwYXRoIGQ9Ik05NiAxNkwxNzYgOTZMOTYgMTc2TDE2IDk2WiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2NmM2ZmIiBzdHJva2Utd2lkdGg9IjYiLz48Y2lyY2xlIGN4PSI5NiIgY3k9Ijk2IiByPSIyOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZlN2IwIiBzdHJva2Utd2lkdGg9IjYiLz48Y2lyY2xlIGN4PSI5NiIgY3k9Ijk2IiByPSIxMCIgZmlsbD0iI2M5YjhmZiIvPjwvc3ZnPg==",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgZmlsbD0iIzA1MDcwZiIvPjxwYXRoIGQ9Ik05NiAxNkwxNzYgOTZMOTYgMTc2TDE2IDk2WiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2NmM2ZmIiBzdHJva2Utd2lkdGg9IjYiLz48Y2lyY2xlIGN4PSI5NiIgY3k9Ijk2IiByPSIyOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZlN2IwIiBzdHJva2Utd2lkdGg9IjYiLz48Y2lyY2xlIGN4PSI5NiIgY3k9Ijk2IiByPSIxMCIgZmlsbD0iI2M5YjhmZiIvPjwvc3ZnPg==",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   Plug, Search, Plus, Heart, Download, ExternalLink, Github, Trash2,
-  Package, Loader2, Star, Sparkles, SpellCheck,
+  Package, Loader2, Star, Sparkles, SpellCheck, ShieldCheck, ShieldX,
 } from "lucide-react";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -57,6 +57,17 @@ export default function Marketplace() {
     { pluginId: detailId ?? 0 },
     { enabled: detailId !== null },
   );
+  // Verification badge (readable by any logged user)
+  const { data: verification } = trpc.marketplace.verification.useQuery(
+    { pluginId: detailId ?? 0 },
+    { enabled: detailId !== null },
+  );
+  const { data: listVerification } = trpc.marketplace.verificationPublic.useQuery(
+    { pluginId: (detailId ?? -1) >= 0 && detailId !== null ? detailId : -1 },
+    { enabled: false },
+  );
+  const [listVerificationIds, setListVerificationIds] = useState<number[]>([]);
+  const listVerificationMap: Record<number, { status: string; verified: boolean }> = {};
   const { data: me } = trpc.auth.me.useQuery();
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
@@ -92,6 +103,28 @@ export default function Marketplace() {
     { enabled: semantic && query.trim().length >= 2, refetchOnWindowFocus: false },
   );
   const displayPlugins = semantic ? (semanticResults || []) : (plugins || []);
+  const pluginIds = displayPlugins.map(p => p.id);
+  // Public verification query keyed per plugin id (enabled only when id > 0)
+  const verificationQuery = trpc.marketplace.verificationPublic.useQuery(
+    { pluginId: listVerificationIds[0] ?? -1 },
+    { enabled: (listVerificationIds[0] ?? -1) > 0, refetchOnWindowFocus: false },
+  );
+  // Cycle through plugin ids to preload verification status one at a time
+  useEffect(() => {
+    // Start from the first plugin whenever the displayed list changes
+    setListVerificationIds(prev => {
+      if (prev.length === 0 && pluginIds.length > 0) return [pluginIds[0]];
+      return prev;
+    });
+    const timer = setInterval(() => {
+      setListVerificationIds(prev => {
+        const next = pluginIds.filter(id => id !== (prev[0] ?? -1));
+        return next.length > 0 ? [next[0]] : [];
+      });
+    }, 250);
+    return () => clearInterval(timer);
+  }, [pluginIds]);
+  if (verificationQuery.data && listVerificationIds.length > 0) listVerificationMap[listVerificationIds[0]] = verificationQuery.data;
   const publishMutation = trpc.marketplace.publish.useMutation({
     onSuccess: () => {
       toast.success("Plugin publicado no marketplace!");
@@ -309,6 +342,12 @@ export default function Marketplace() {
                   {(CATEGORY_LABELS[p.category] || p.category).toUpperCase()}
                 </span>
               </div>
+              {listVerificationMap[p.id] !== undefined && (
+                <span className={`inline-flex items-center gap-1 text-[8px] font-mono px-2 py-0.5 rounded border ${listVerificationMap[p.id].verified ? "text-[#3fe7b0] border-[#3fe7b0]/30" : "text-[#ff6b6b] border-[#ff6b6b]/30"}`}>
+                  {listVerificationMap[p.id].verified ? <ShieldCheck className="h-2.5 w-2.5" /> : <ShieldX className="h-2.5 w-2.5" />}
+                  {listVerificationMap[p.id].verified ? "VERIFICADO" : "NÃO VERIFICADO"}
+                </span>
+              )}
               <p className="text-[11px] font-mono text-[#aab4d6] line-clamp-3 flex-1">{p.description}</p>
               {p.githubUrl && (
                 <a
@@ -373,6 +412,22 @@ export default function Marketplace() {
                 <DialogDescription className="text-[9px] font-mono text-[#7684a0]">
                   v{detail.version} · {(CATEGORY_LABELS[detail.category] || detail.category).toUpperCase()} · Autor ID {detail.authorId}
                 </DialogDescription>
+                {verification && (
+                  <div className={`inline-flex items-center gap-1.5 text-[9px] font-mono px-2 py-1 rounded border ${verification.verified ? "text-[#3fe7b0] border-[#3fe7b0]/30 bg-[#3fe7b0]/5" : "text-[#ff6b6b] border-[#ff6b6b]/30 bg-[#ff6b6b]/5"}`}>
+                    {verification.verified ? <ShieldCheck className="h-3 w-3" /> : <ShieldX className="h-3 w-3" />}
+                    {verification.verified ? "PLUGIN VERIFICADO" : "VERIFICAÇÃO REPROVADA"}
+                    <span className="text-[8px] opacity-70">({verification.checks.filter(c => c.passed).length}/{verification.checks.length} testes)</span>
+                  </div>
+                )}
+                {verification && verification.checks.length > 0 && (
+                  <div className="space-y-0.5">
+                    {verification.checks.map((c, i) => (
+                      <p key={i} className={`text-[8px] font-mono ${c.passed ? "text-[#aab4d6]" : "text-[#ff6b6b]"}`}>
+                        {c.passed ? "✓" : "✗"} {c.name}{c.note ? ` — ${c.note}` : ""}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </DialogHeader>
               <p className="text-[11px] font-mono text-[#aab4d6] whitespace-pre-wrap">{detail.description}</p>
 
