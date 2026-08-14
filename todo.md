@@ -153,3 +153,12 @@
 - [x] Frontend: página /leaderboard com ranking XP (top-20 + meu XP)
 - [x] SW cache offline de missões recentes (nexus-missions-v1)
 - [x] Vitest coverage (50/50 tests passing) + screenshots + checkpoint eee9251a + GitHub sync
+
+## Phase 11 — Reputação de Perfil, Notificações em Tempo Real, Templates de Missão
+- [ ] Sistema de níveis de reputação (XP thresholds -> badges: Iniciante, Explorador, Arquiteto, Mago, Lenda) em db.ts + helper
+- [ ] Socket.io: broadcast in-app notification events (notificação:push) no createInAppNotification
+- [ ] Templates de missão: tabela mission_templates (título, descrição, inputSugerido, agentes, categoria) + seed + roteador marketplace.publishTemplate/listTemplates/useTemplate
+- [ ] Frontend: nível de reputação no Perfil e sidebar (barra XP + próximo nível)
+- [ ] Frontend: notificações push ao vivo sem recarregar (socket listener na página Notificações)
+- [ ] Frontend: aba Templates no Marketplace com botão "Usar template" que preenche Minha IA
+- [ ] Vitest coverage (nível de reputação + templates + socket) + screenshots + checkpoint + GitHub sync

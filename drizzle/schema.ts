@@ -276,3 +276,15 @@ export const xpEvents = mysqlTable("xp_events", {
   xp: int("xp").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Phase 11: Mission templates — ready-made mission blueprints from the marketplace
+export const missionTemplates = mysqlTable("missionTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description").notNull(),
+  suggestedInput: text("suggestedInput").notNull(),
+  agents: varchar("agents", { length: 255 }).notNull().default(""),
+  category: varchar("category", { length: 64 }).notNull().default("geral"),
+  icon: varchar("icon", { length: 32 }).notNull().default("Zap"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
