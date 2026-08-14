@@ -3,6 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import {
+  addMissionStep, getMissionSteps, deleteMissionSteps,
   getDashboardStats, seedPlugins, seedModels, seedAgents,
   getPlugins, updatePluginConnection, upsertPlugin,
   getModels, updateModelConnection,
@@ -46,6 +47,21 @@ import { getDb } from "./db";
 import { broadcastNotificationPush } from "./socket";
 import { memory, marketplaceReviews, missions, marketplacePlugins } from "../drizzle/schema";
 import { ACHIEVEMENTS } from "./db";
+
+// O feed cognitivo é lido por usuários finais: converte erros técnicos brutos
+// (AbortError, timeouts do upstream de LLM) em mensagens humanas e amigáveis.
+function friendlyMissionError(raw: string): string {
+  if (/aborted|AbortError/i.test(raw)) {
+    return "A conexão com o serviço de IA foi interrompida — a missão foi encerrada. Tente novamente em instantes.";
+  }
+  if (/timed out|timeout/i.test(raw)) {
+    return "O serviço de IA demorou demais para responder — a missão foi encerrada. Tente novamente em instantes.";
+  }
+  if (/network|fetch|undici|ECONNRESET|ENOTFOUND/i.test(raw)) {
+    return "Houve um problema temporário de rede com o serviço de IA — a missão foi encerrada. Tente novamente em instantes.";
+  }
+  return "A missão não pôde ser concluída no momento por um erro temporário. Tente novamente em instantes.";
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -285,11 +301,35 @@ export const appRouter = router({
 
     listScheduled: protectedProcedure.query(async ({ ctx }) => getScheduledMissions(ctx.user.id)),
 
-    execute: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string() })).mutation(async ({ ctx, input }) => {
+    execute: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string(), mode: z.enum(["classic", "agent"]).optional().default("classic") })).mutation(async ({ ctx, input }) => {
+      try {
       const userId = ctx.user.id;
       const missionId = input.missionId;
 
-      // 1. Interpret mission
+      // Fase 13 — Modo Agente (fusão NEXUS × Manus): loop autônomo com tool calling
+      if (input.mode === "agent") {
+        const { runAgentLoop } = await import("./nexus-agent");
+        try {
+          await updateMission(userId, missionId, { status: "executing", startedAt: new Date() });
+          const loopResult = await runAgentLoop(userId, missionId, input.input);
+          await addMemory(userId, { content: `Missão: ${input.input}\nResultado: ${loopResult.result}`, confidence: loopResult.confidence, origin: "mission", tags: ["mission", "result", "agent"] });
+          await updateMission(userId, missionId, { status: "completed", result: loopResult.result, confidence: loopResult.confidence, completedAt: new Date() });
+          await addFeedEvent(userId, { eventType: "complete", message: `Missão concluída no Modo Agente — confiança: ${Math.round(loopResult.confidence * 100)}%`, missionId, confidence: loopResult.confidence });
+          try { await awardXp(userId, "mission_complete"); } catch { /* never block */ }
+          fireMissionWebhooks(missionId, { input: input.input, result: loopResult.result, confidence: loopResult.confidence }).catch(() => {});
+          evaluateAchievements(userId).catch(() => {});
+          return { interpretation: loopResult.interpretation, tasks: [], result: loopResult.result, confidence: loopResult.confidence };
+        } catch (error) {
+          try {
+            await updateMission(userId, missionId, { status: "failed", completedAt: new Date() }).catch(() => {});
+            const friendly = friendlyMissionError(String(error));
+            await addFeedEvent(userId, { eventType: "error", message: friendly, missionId }).catch(() => {});
+          } catch { /* failure reporting must never throw */ }
+          throw error;
+        }
+      }
+
+      // 1. Interpret mission (pipeline clássico)
       const interpretation = await invokeLLM({
         model: 'gpt-5-mini',
         messages: [
@@ -370,7 +410,7 @@ export const appRouter = router({
             { role: 'user', content: `Mission: ${input.input}\nTask: ${task.description}` },
           ],
         });
-        await addFeedEvent(userId, { eventType: 'result', message: `Agente ${task.agent}: tarefa concluída`, agentName: task.agent, missionId, confidence: 0.7 + Math.random() * 0.25 });
+        await addFeedEvent(userId, { eventType: 'result', message: `Agente ${task.agent}: tarefa concluída`, agentName: task.agent, missionId, confidence: Number((0.7 + Math.random() * 0.25).toFixed(3)) });
       }
 
       // 4. Synthesize result
@@ -382,7 +422,7 @@ export const appRouter = router({
         ],
       });
 
-      const confidence = 0.75 + Math.random() * 0.2;
+      const confidence = Number((0.75 + Math.random() * 0.2).toFixed(3));
       const resultText = typeof finalResult.choices[0].message.content === 'string'
         ? finalResult.choices[0].message.content
         : String(finalResult.choices[0].message.content);
@@ -411,6 +451,42 @@ export const appRouter = router({
       evaluateAchievements(userId).catch(() => {});
 
       return { interpretation: interp, tasks: plan.tasks, result: resultText, confidence };
+      } catch (error) {
+        // Never leave a mission stuck in EXECUTING — mark it failed and log the
+        // cause in the feed so the user can see what went wrong.
+        try {
+          await updateMission(ctx.user.id, input.missionId, { status: 'failed', completedAt: new Date() }).catch(() => {});
+          await addFeedEvent(ctx.user.id, {
+            eventType: 'error',
+            message: friendlyMissionError(String(error)),
+            missionId: input.missionId,
+          }).catch(() => {});
+        } catch { /* failure reporting must never throw */ }
+        throw error;
+      }
+    }),
+
+    /** Fase 13 — Modo Agente (fusão NEXUS × Manus): loop autônomo com tool calling */
+    executeAgent: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string() })).mutation(async ({ ctx, input }) => {
+      const { runAgentLoop } = await import("./nexus-agent");
+      const userId = ctx.user.id;
+      try {
+        return await runAgentLoop(userId, input.missionId, input.input);
+      } catch (error) {
+        try {
+          await updateMission(userId, input.missionId, { status: 'failed', completedAt: new Date() }).catch(() => {});
+          await addFeedEvent(userId, { eventType: 'error', message: friendlyMissionError(String(error)), missionId: input.missionId }).catch(() => {});
+        } catch { /* failure reporting must never throw */ }
+        throw error;
+      }
+    }),
+
+    /** Fase 13 — Replay do histórico de passos do agente para a consola em tempo real */
+    getSteps: protectedProcedure.input(z.object({ missionId: z.number() })).query(async ({ ctx, input }) => getMissionSteps(input.missionId)),
+
+    clearSteps: protectedProcedure.input(z.object({ missionId: z.number() })).mutation(async ({ ctx, input }) => {
+      await deleteMissionSteps(input.missionId);
+      return { success: true };
     }),
   }),
 

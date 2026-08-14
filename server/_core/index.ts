@@ -55,6 +55,62 @@ async function startServer() {
   // Setup Socket.IO for real-time events
   setupSocketIO(server);
 
+  // Fase 13 — SSE streaming dos passos do agente (consola em tempo real)
+  // GET /api/missions/stream/:missionId — emite steps novos como text/event-stream;
+  // fecha automaticamente quando a missão não está mais em execução.
+  app.get("/api/missions/stream/:missionId", async (req, res) => {
+    try {
+      const missionId = parseInt(req.params.missionId, 10);
+      if (Number.isNaN(missionId)) return res.status(400).json({ error: "invalid missionId" });
+
+      const { sdk } = await import("./sdk");
+      let user;
+      try {
+        user = await sdk.authenticateRequest(req);
+      } catch { /* fall through to 401 */ }
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+
+      const { getMissionById, getMissionSteps } = await import("../db");
+      const mission = await getMissionById(user.id, missionId);
+      if (!mission) return res.status(404).json({ error: "Mission not found" });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      let lastId = 0;
+      const interval = setInterval(async () => {
+        try {
+          const steps = await getMissionSteps(missionId);
+          const fresh = steps.filter(s => s.id > lastId);
+          for (const step of fresh) {
+            lastId = step.id;
+            res.write(`event: step\ndata: ${JSON.stringify({ id: step.id, stepType: step.stepType, toolName: step.toolName ?? null, agentName: step.agentName ?? null, detail: step.detail ?? null, createdAt: step.createdAt })}\n\n`);
+          }
+          // Snapshot do estado da missão a cada ciclo
+          const live = await getMissionById(user.id, missionId);
+          res.write(`event: status\ndata: ${JSON.stringify({ status: live?.status ?? null, confidence: live?.confidence ?? null })}\n\n`);
+          if (live && live.status !== "executing") {
+            res.write(`event: done\ndata: ${JSON.stringify({ status: live.status, result: live.result ?? null, confidence: live.confidence ?? null })}\n\n`);
+            clearInterval(interval);
+            res.end();
+          }
+        } catch (err) {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: String(err) })}\n\n`);
+        }
+      }, 1000);
+
+      req.on("close", () => clearInterval(interval));
+      // Limite de segurança: fecha a conexão após 15 minutos
+      setTimeout(() => { clearInterval(interval); res.end(); }, 15 * 60 * 1000);
+    } catch (error) {
+      if (!res.headersSent) res.status(500).json({ error: String(error) });
+      else res.end();
+    }
+  });
+
   // Scheduled mission callback endpoint
   app.post("/api/scheduled/mission-*", async (req, res) => {
     try {

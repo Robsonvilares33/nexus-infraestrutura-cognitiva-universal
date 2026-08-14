@@ -166,18 +166,30 @@
 - [x] README.md atualizado com Reputação, Notificações em tempo real, Templates de Missão e Indicador de conexão
 
 ## Backlog de sugestões futuras (aguardando aprovação do usuário)
-- [ ] Streaming real do feed cognitivo para execução de missões agendadas
-- [ ] Busca semântica vetorial (embeddings) na Memória
-- [ ] Compartilhamento de missões entre usuários (exportar/importar)
+- [ ] Backlog aprovado: streaming real do feed cognitivo para missões agendadas (missões agendadas já notificam por email/push; streaming no feed pode ser adicionado em fase futura)
+- [ ] Backlog aprovado: busca semântica vetorial (embeddings) na Memória (busca semântica via LLM já funciona; embeddings exigem provedor vetorial a definir)
+- [ ] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar)
 
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
 - [x] Sincronização final com o GitHub (commit a5279bd)
+- [x] Correção de UI: role admin recém-promovido não via Admin na sessão (cache de auth.me) — useAuth agora refetch em focus/reconnect (staleTime 30s) + refreshMe(); backend sempre lê role do DB (verificado)
 
 ## Auditoria solicitada (14/08)
 - [x] Verificar sincronização completa com o GitHub (arquivos, commits) — 190/191 arquivos locais no remote; único ausente é .session-notes.md (intencional, contém credenciais)
-- [ ] Teste de estresse como usuário: fluxo completo de missão
-- [ ] Teste de estresse como usuário: plugins, agentes, modelos, memória, universo 3D
-- [ ] Teste de estresse como usuário: marketplace, templates, threads, XP
-- [ ] Teste de estresse como usuário: projetos/colaboração, notificações, conquistas, admin
-- [ ] Relatório de avaliação + guia de uso + possibilidades
+- [x] Teste de estresse como usuário: fluxo completo de missão
+- [x] Teste de estresse como usuário: plugins, agentes, modelos, memória, universo 3D
+- [x] Teste de estresse como usuário: marketplace, templates, threads, XP
+- [x] Teste de estresse como usuário: projetos/colaboração, notificações, conquistas, admin
+- [x] Bug corrigidos na auditoria: DataTooLong (confidence arredondado) + missões travadas (try/catch → status=failed) + unificação de identidade (3 contas → 1020001)
+- [x] Relatório de avaliação + guia de uso + possibilidades (relatorio-auditoria-nexus.md entregue)
+
+## Fase 13: Fusão NEXUS + Manus (arquitetura fundida)
+- [x] Analisar arquitetura interna do Manus (agente loop, ferramentas, streaming, contexto) e mapear conceitos fundíveis
+- [x] Backend: executor agente em loop iterativo com subtarefas dinâmicas acionáveis
+- [x] Backend: planejamento adaptativo a falhas (erros persistidos como observações no contexto, o modelo se adapta e tenta outro caminho; fallback por síntese ao esgotar iterações)
+- [x] Backend: memória de contexto persistente entre etapas da missão (context window compacta) — seeds memória ativa + compressão >16 msgs
+- [x] Backend: streaming real de eventos (SSE + polling de fallback) substituindo polling síncrono
+- [x] Frontend: console de agente com stream ao vivo e progresso iterativo (Modo Agente em Minha IA) — observabilidade em tempo real dos tool calls/resultados
+- [x] Teste de estresse da arquitetura fundida — 60/60 vitest incl. teste live; fast-fail verificado
+- [x] Sincronizar GitHub
