@@ -91,6 +91,20 @@ export default function MinhaIA() {
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
   }, [feed, liveEvents]);
 
+  // Phase 11: consume prefilled template input from Marketplace "Usar template"
+  useEffect(() => {
+    try {
+      const templateInput = localStorage.getItem("nexus-template-input");
+      if (templateInput) {
+        localStorage.removeItem("nexus-template-input");
+        setInput(templateInput);
+        toast.info("Template preenchido — ajuste o texto e envie a missão.");
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
   const handleSubmit = async () => {
     if (!input.trim()) return;
     setLiveEvents([]);

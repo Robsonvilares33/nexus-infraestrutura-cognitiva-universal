@@ -36,6 +36,34 @@ const ADMIN_NAV_ITEMS = [
   { path: "/admin", label: "Admin", icon: ShieldCheck },
 ];
 
+function ReputationLine({ collapsed, isAuthenticated }: { collapsed: boolean; isAuthenticated: boolean }) {
+  const { data: rep, isLoading } = trpc.reputation.me.useQuery(undefined, {
+    enabled: isAuthenticated && !collapsed,
+  });
+  if (isLoading || !rep) return null;
+  const pct = Math.round((rep.progress ?? 0) * 100);
+  return (
+    <Link href="/profile" className="block mb-2">
+      <div className="nexus-card px-2.5 py-1.5 flex items-center gap-2">
+        <span className="text-sm leading-none shrink-0" title={rep.level.name}>{rep.level.icon}</span>
+        <div className="overflow-hidden flex-1">
+          <p className="text-[9px] font-mono text-[#e2e8f4] truncate">
+            {rep.level.name} · <span className="text-[#7cf3ff]">{rep.totalXp} XP</span>
+          </p>
+          <div className="mt-1 h-1 rounded-full bg-[rgba(150,175,220,0.12)] overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-[#7cf3ff] to-[#ffd479]" style={{ width: `${pct}%` }} />
+          </div>
+          {rep.nextLevel && (
+            <p className="text-[8px] font-mono text-[#7684a0] mt-0.5 truncate">
+              Próximo: {rep.nextLevel.name} ({rep.nextLevel.required - rep.totalXp} XP restantes)
+            </p>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 export default function NexusLayout({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, loading, logout } = useAuth();
   const [location] = useLocation();
@@ -181,6 +209,8 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
             </div>
           )}
         </div>
+        {/* Phase 11: reputation level + XP progress in sidebar */}
+        <ReputationLine collapsed={collapsed} isAuthenticated={isAuthenticated} />
         <button
           onClick={() => logout()}
           className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[9px] font-mono text-[#7684a0] hover:text-[#ff6b6b] hover:bg-[rgba(255,107,107,0.05)] transition-colors ${collapsed ? "justify-center" : ""}`}

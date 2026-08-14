@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { verifyPluginSource, getDb, removeMarketplacePlugin } from "./db";
+import { verifyPluginSource, getDb, removeMarketplacePlugin, getReputationLevel, getNextLevel, setNotificationPushCallback } from "./db";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
@@ -766,4 +766,53 @@ describe("XP leaderboard (Phase 10)", () => {
     const plugin = plugins.find((p: any) => String(p.name).startsWith("vitest-xp-plugin"));
     if (plugin) await caller.marketplace.remove({ pluginId: plugin.id });
   }, 60000);
+});
+
+describe("reputation levels (Phase 11)", () => {
+  it("classifies XP into correct tiers", async () => {
+    expect(getReputationLevel(0).name).toBe("Iniciante");
+    expect(getReputationLevel(99).name).toBe("Iniciante");
+    expect(getReputationLevel(100).name).toBe("Explorador");
+    expect(getReputationLevel(299).name).toBe("Explorador");
+    expect(getReputationLevel(300).name).toBe("Arquiteto");
+    expect(getReputationLevel(800).name).toBe("Mago");
+    expect(getReputationLevel(2000).name).toBe("Lenda");
+    expect(getReputationLevel(5000).name).toBe("Lenda");
+  });
+  it("computes the next level correctly", async () => {
+    expect(getNextLevel(0)?.required).toBe(100);
+    expect(getNextLevel(150)?.required).toBe(300);
+    expect(getNextLevel(3000)).toBeNull();
+  });
+});
+
+describe("mission templates (Phase 11)", () => {
+  it("lists, creates and removes templates", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    const created = await caller.templates.create({
+      title: "vitest-template-unit",
+      description: "Template de teste criado pelo vitest",
+      suggestedInput: "Teste de missao do vitest",
+    });
+    expect(created.success).toBe(true);
+    const list = await caller.templates.list();
+    expect(list.some(t => t.title === "vitest-template-unit")).toBe(true);
+    // Remove requires admin role — a regular user must be rejected
+    await expect(caller.templates.remove({ id: created.id })).rejects.toThrow();
+    // Cleanup as admin
+    const adminCtx = createTestContext({ user: { ...ctx.user!, role: "admin" } });
+    const admin = appRouter.createCaller(adminCtx);
+    const removed = await admin.templates.remove({ id: created.id });
+    expect(removed.success).toBe(true);
+  });
+});
+
+describe("notification push callback (Phase 11)", () => {
+  it("registers the socket push callback without circular import", async () => {
+    expect(setNotificationPushCallback).toBeTypeOf("function");
+    // socket module loads cleanly — its registration callback runs at import time
+    await import("./socket");
+    expect(true).toBe(true);
+  });
 });

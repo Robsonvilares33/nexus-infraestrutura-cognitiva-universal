@@ -6,7 +6,7 @@ import {
   suggestedCategories,
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
-  pluginThreads, xpEvents,
+  pluginThreads, xpEvents, missionTemplates,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -1082,6 +1082,16 @@ export async function addInAppNotification(userId: number, type: string, title: 
   const db = await getDb();
   if (!db) return;
   await db.insert(inAppNotifications).values({ userId, type, title, content });
+  // Phase 11: push the notification in real time via sockets (set by socket.ts bootstrap)
+  if (notifyPushCallback) {
+    try { notifyPushCallback(String(userId), { type, title, content }); } catch { /* never block inserts */ }
+  }
+}
+
+// Callback registered by socket.ts to avoid a circular import between db and socket modules
+let notifyPushCallback: ((userId: string, payload: { type: string; title: string; content?: string }) => void) | null = null;
+export function setNotificationPushCallback(fn: ((userId: string, payload: { type: string; title: string; content?: string }) => void) | null) {
+  notifyPushCallback = fn;
 }
 
 export async function listUserNotifications(userId: number, limit = 50) {
@@ -1328,4 +1338,135 @@ export async function getMyXp(userId: number) {
     contributions: mine?.contributions ?? 0,
     rank: mine?.rank ?? (all.length + 1),
   };
+}
+
+// Phase 11 — reputation levels by XP
+export const REPUTATION_LEVELS = [
+  { min: 0, name: "Iniciante", icon: "🌱", color: "#7684a0" },
+  { min: 100, name: "Explorador", icon: "🧭", color: "#3fe7b0" },
+  { min: 300, name: "Arquiteto", icon: "🏗️", color: "#7cf3ff" },
+  { min: 800, name: "Mago", icon: "🔮", color: "#c9b8ff" },
+  { min: 2000, name: "Lenda", icon: "👑", color: "#ffd479" },
+] as const;
+
+export type ReputationLevel = (typeof REPUTATION_LEVELS)[number];
+
+export function getReputationLevel(totalXp: number): ReputationLevel {
+  let level: ReputationLevel = REPUTATION_LEVELS[0];
+  for (const lvl of REPUTATION_LEVELS) {
+    if (totalXp >= lvl.min) level = lvl;
+  }
+  return level;
+}
+
+export function getNextLevel(totalXp: number) {
+  for (const lvl of REPUTATION_LEVELS) {
+    if (totalXp < lvl.min) return { ...lvl, required: lvl.min };
+  }
+  return null;
+}
+
+export async function getReputation(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ totalXp: sql<number>`SUM(${xpEvents.xp})`, contributions: sql<number>`COUNT(*)` })
+    .from(xpEvents)
+    .where(eq(xpEvents.userId, userId))
+    .limit(1);
+  const totalXp = Number(rows[0]?.totalXp ?? 0);
+  const contributions = Number(rows[0]?.contributions ?? 0);
+  const level = getReputationLevel(totalXp);
+  const next = getNextLevel(totalXp);
+  const progress = next
+    ? Math.min(1, totalXp / next.required)
+    : 1;
+  return { totalXp, contributions, level, nextLevel: next, progress };
+}
+
+
+export async function createMissionTemplate(data: {
+  title: string; description: string; suggestedInput: string; agents?: string; category?: string; icon?: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(missionTemplates).values(data);
+  const insertId = result[0].insertId;
+  return insertId;
+}
+
+export async function listMissionTemplates() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(missionTemplates);
+}
+
+export async function removeMissionTemplate(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(missionTemplates).where(eq(missionTemplates.id, id));
+  return true;
+}
+
+// Phase 11 — seed ready-made mission templates once
+const MISSION_TEMPLATES_SEED = [
+  {
+    title: "Análise de Mercado",
+    description: "Pesquisa e síntese de um mercado ou setor específico, com tendências, concorrentes e oportunidades.",
+    suggestedInput: "Análise do mercado de [SETOR] no Brasil: principais concorrentes, tendências dos últimos 12 meses e oportunidades de entrada.",
+    agents: "Pesquisa,Síntese,Análise",
+    category: "pesquisa",
+    icon: "ChartLine",
+  },
+  {
+    title: "Automação de E-mails",
+    description: "Criação de fluxo de e-mails automatizados para nutrição de leads ou comunicação com clientes.",
+    suggestedInput: "Crie uma sequência de 5 e-mails para nutrição de leads interessados em [PRODUTO], tom profissional e chamadas para ação claras.",
+    agents: "Comunicação,Código",
+    category: "automação",
+    icon: "Mail",
+  },
+  {
+    title: "Resumo de Notícias",
+    description: "Agrega as notícias mais relevantes do dia em um determinado tema e gera um resumo estruturado.",
+    suggestedInput: "Resuma as principais notícias de tecnologia de hoje sobre [TEMA], organizadas por impacto e com links das fontes.",
+    agents: "Pesquisa,Síntese",
+    category: "pesquisa",
+    icon: "Newspaper",
+  },
+  {
+    title: "Pesquisa Profunda",
+    description: "Investigação aprofundada sobre um tema com múltiplas fontes, cruzamento de informações e relatório final.",
+    suggestedInput: "Pesquisa profunda sobre [TEMA]: histórico, estado da arte, principais players, controvérsias e projeções para os próximos 5 anos.",
+    agents: "Pesquisa,Memória,Síntese,Crítica",
+    category: "pesquisa",
+    icon: "Search",
+  },
+  {
+    title: "Correção de Bugs",
+    description: "Diagnóstico e correção de um problema de código com análise da causa raiz e explicação da solução.",
+    suggestedInput: "Analise o erro a seguir e proponha a correção com explicação da causa raiz: [COLE O ERRO/STACK TRACE AQUI]",
+    agents: "Código,Crítica",
+    category: "código",
+    icon: "Wrench",
+  },
+  {
+    title: "Monitoramento Agendado",
+    description: "Acompanhamento periódico de uma métrica, preço ou indicador com alerta ao detectar mudança relevante.",
+    suggestedInput: "Monitore semanalmente [MÉTRICA/INDICADOR] e me notifique com resumo das variações e possíveis causas.",
+    agents: "Pesquisa,Síntese,Comunicação",
+    category: "automação",
+    icon: "Activity",
+  },
+] as const;
+
+export async function seedMissionTemplates() {
+  const db = await getDb();
+  if (!db) return 0;
+  const existing = await db.$count(missionTemplates);
+  if (existing > 0) return existing;
+  for (const t of MISSION_TEMPLATES_SEED) {
+    await createMissionTemplate({ ...t });
+  }
+  return MISSION_TEMPLATES_SEED.length;
 }

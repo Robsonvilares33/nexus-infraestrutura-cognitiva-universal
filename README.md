@@ -20,6 +20,10 @@ Infraestrutura cognitiva universal: um ecossistema distribuido de inteligencias 
 | Threads de plugins | Discussoes aninhadas (respostas) nos detalhes de cada plugin do Marketplace |
 | Leaderboard | Ranqueamento top-20 por XP de contribuicoes comunitarias (+50 plugin, +20 missao, +10 review, +5 colaboracao) |
 | Modo offline | Service worker armazena missoes recentes em cache para consulta sem conexao |
+| Reputacao & XP | Niveis de reputacao baseados em XP (Iniciante, Explorador, Operador, Engenheiro, Arquiteto, Mago, Oráculo) com progresso no Perfil |
+| Notificacoes em tempo real | Push instantaneo via Socket.io com toasts (Sonner) e Central de Notificacoes com leitura e filtros |
+| Templates de Missao | 6 modelos prontos no Marketplace para iniciar missoes com um clique |
+| Indicador de conexao | Status CONECTADO/OFFLINE no cabeçalho via navigator.onLine |
 
 ## Rodar localmente
 
@@ -114,4 +118,4 @@ npm install
 npm test
 ```
 
-A suíte de testes (Vitest) cobre rotas tRPC, validação de plugins, colaboração, threads e XP — mais de 50 testes passando.
+A suíte de testes (Vitest) cobre rotas tRPC, validação de plugins, colaboração, threads, XP, reputação, templates de missão e o callback de push de notificações — mais de 50 testes passando.

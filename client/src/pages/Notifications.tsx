@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import { io, Socket } from "socket.io-client";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Bell, CheckCheck, Rocket, Star, Mail, Info, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,6 +26,28 @@ export function Notifications() {
   const markAllMutation = trpc.notifications.markAllRead.useMutation({
     onSuccess: () => refetch(),
   });
+
+  // Phase 11: live notification push via Socket.io — no page refresh needed
+  const socketRef = useRef<Socket | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    const socket = io(window.location.origin, {
+      path: "/socket.io/",
+      query: { userId: String(user.id) },
+      transports: ["websocket", "polling"],
+    });
+    socketRef.current = socket;
+
+    socket.on("notification:push", (payload: { type: string; title: string; content?: string }) => {
+      toast(payload.title, { description: payload.content, duration: 6000 });
+      refetch();
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [user?.id]);
 
   const rows = (data ?? []).filter(n => (unreadOnly ? !n.isRead : true));
 

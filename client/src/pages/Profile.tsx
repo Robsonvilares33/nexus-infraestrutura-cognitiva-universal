@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  UserCircle2, Loader2, Save, Brain, Plug, Package, Star, Share2,
+  UserCircle2, Loader2, Save, Brain, Plug, Package, Star, Share2, Award, Zap,
 } from "lucide-react";
 
 const ACCENT_COLORS = ["#7cf3ff", "#c9b8ff", "#ffd479", "#3fe7b0", "#ff6b6b"];
@@ -42,6 +42,14 @@ export default function Profile() {
         <p className="text-[10px] font-mono text-[#7684a0] tracking-wider uppercase">
           Identidade digital no ecossistema NEXUS
         </p>
+      </div>
+
+      {/* Phase 11: reputation level from accumulated XP */}
+      <div className="nexus-card p-4">
+        <p className="text-[9px] font-mono text-[#7684a0] tracking-wider uppercase mb-3 flex items-center gap-2">
+          <Award className="h-3.5 w-3.5 text-[#ffd479]" /> Reputação & XP
+        </p>
+        <ReputationCard />
       </div>
 
       {/* Edit card */}
@@ -200,6 +208,43 @@ export default function Profile() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ReputationCard() {
+  const { data: rep, isLoading } = trpc.reputation.me.useQuery();
+  if (isLoading) return <div className="h-16 animate-pulse" />;
+  if (!rep) return <p className="text-[10px] font-mono text-[#7684a0]">Sem dados de reputação ainda.</p>;
+  const level = rep.level as { name: string; icon: string; color: string };
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="text-xl" title={level.name}>{level.icon}</span>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: level.color }}>{level.name}</p>
+            <p className="text-[10px] font-mono text-[#7684a0]">{rep.totalXp} XP · {rep.contributions} contribuições</p>
+          </div>
+        </div>
+        {rep.nextLevel ? (
+          <div className="text-right">
+            <p className="text-[10px] font-mono text-[#aab4d6]">Próximo: {(rep.nextLevel as { name: string; required: number }).name}</p>
+            <p className="text-[9px] font-mono text-[#55648a]">{rep.nextLevel.required - rep.totalXp} XP restantes</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-[#ffd479]">
+            <Zap className="h-3.5 w-3.5" />
+            <span className="text-[10px] font-mono">Nível máximo</span>
+          </div>
+        )}
+      </div>
+      <div className="h-1.5 rounded-full bg-[rgba(3,5,14,0.8)] border border-[rgba(150,175,220,0.1)] overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${Math.round(rep.progress * 100)}%`, backgroundColor: level.color }}
+        />
       </div>
     </div>
   );
