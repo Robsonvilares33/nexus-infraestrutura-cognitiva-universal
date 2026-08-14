@@ -698,3 +698,72 @@ describe("project collaboration", () => {
     await caller.projects.delete({ projectId: pId });
   }, 60000);
 });
+
+describe("plugin discussion threads (Phase 10)", () => {
+  it("creates, lists and replies to threads with nesting", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    // Publish a plugin to discuss about
+    await caller.marketplace.publish({
+      name: `vitest-thread-plugin-${Date.now()}`,
+      category: "utility",
+      description: "teste threads",
+      sourceCode: "export default function hello() { return 'oi'; }",
+    });
+    const plugins = await caller.marketplace.list({} as any);
+    const plugin = plugins.find((p: any) => String(p.name).startsWith("vitest-thread-plugin"));
+    expect(plugin).toBeDefined();
+    const pid = plugin!.id;
+    // Root post + reply
+    await caller.threads.create({ pluginId: pid, content: "Como uso este plugin?" });
+    const rootList = await caller.threads.list({ pluginId: pid });
+    expect(rootList.length).toBe(1);
+    const parentId = rootList[0].id;
+    await caller.threads.create({ pluginId: pid, content: "Basta instalar pelo marketplace!", parentId });
+    const nested = await caller.threads.list({ pluginId: pid });
+    expect(nested.length).toBe(2);
+    expect(nested.find(t => t.parentId === parentId)).toBeDefined();
+    // Author names resolved
+    expect(nested[0].authorName).toBeTruthy();
+    // Only author can remove; cascade deletes the reply
+    const other: TrpcContext = {
+      ...createTestContext(),
+      user: { ...createTestContext().user!, id: 2, openId: "invitee-nexus", email: "inv@nexus.ai", name: "Invitee" } as TrpcContext["user"],
+    };
+    const removed = await appRouter.createCaller(other).threads.remove({ id: parentId });
+    expect(removed.success).toBe(false);
+    const ok = await caller.threads.remove({ id: parentId });
+    expect(ok.success).toBe(true);
+    const gone = await caller.threads.list({ pluginId: pid });
+    expect(gone.length).toBe(0);
+    // Cleanup
+    await caller.marketplace.remove({ pluginId: pid });
+  }, 60000);
+});
+
+describe("XP leaderboard (Phase 10)", () => {
+  it("awards XP on plugin publish and exposes leaderboard", async () => {
+    const ctx = createTestContext();
+    const caller = appRouter.createCaller(ctx);
+    // Capture XP before
+    const before = await caller.leaderboard.my();
+    await caller.marketplace.publish({
+      name: `vitest-xp-plugin-${Date.now()}`,
+      category: "utility",
+      description: "teste xp",
+      sourceCode: "export const a = 1;",
+    });
+    const after = await caller.leaderboard.my();
+    expect(after.totalXp).toBeGreaterThanOrEqual((before?.totalXp ?? 0) + 50);
+    // Leaderboard public endpoint returns ranked entries
+    const board = await appRouter.createCaller(createTestContext()).leaderboard.list();
+    expect(board.length).toBeGreaterThan(0);
+    expect(board[0].rank).toBe(1);
+    expect(board[0].totalXp).toBeGreaterThan(0);
+    expect(board[0].contributions).toBeGreaterThan(0);
+    // Cleanup
+    const plugins = await caller.marketplace.list({} as any);
+    const plugin = plugins.find((p: any) => String(p.name).startsWith("vitest-xp-plugin"));
+    if (plugin) await caller.marketplace.remove({ pluginId: plugin.id });
+  }, 60000);
+});

@@ -17,6 +17,9 @@ Infraestrutura cognitiva universal: um ecossistema distribuido de inteligencias 
 | Conquistas | Sistema de gamificacao com 8 badges e notificacoes |
 | E-mails reais | Integracao Resend para notificacoes por e-mail |
 | PWA | Instalavel no celular/desktop via service worker e manifest |
+| Threads de plugins | Discussoes aninhadas (respostas) nos detalhes de cada plugin do Marketplace |
+| Leaderboard | Ranqueamento top-20 por XP de contribuicoes comunitarias (+50 plugin, +20 missao, +10 review, +5 colaboracao) |
+| Modo offline | Service worker armazena missoes recentes em cache para consulta sem conexao |
 
 ## Rodar localmente
 
@@ -103,3 +106,12 @@ Use `POST /api/tools/run` com `name` e `input`.
 ## Estado atual
 
 Esta versao deixa a ideia funcionando como aplicacao web globalmente publicavel e como pacote local-first. Ja existe API local, SQLite, catalogo de ecossistema, missao persistida, timeline de execucao, adaptador Ollama com fallback offline e executor local que cria artefatos reais em `data/artifacts/` e documentos/projetos em `data/generated/`. Autenticacao OAuth, conectores externos, memoria vetorial e execucao avancada de ferramentas ainda sao proximos modulos.
+
+## Testes
+
+```bash
+npm install
+npm test
+```
+
+A suíte de testes (Vitest) cobre rotas tRPC, validação de plugins, colaboração, threads e XP — mais de 50 testes passando.

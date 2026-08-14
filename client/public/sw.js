@@ -1,5 +1,9 @@
 // NEXUS PWA service worker — cache-first for app shell, network-first for API
+// Phase 10: offline mission cache for recent missions
 const CACHE_NAME = "nexus-app-v1";
+const MISSIONS_CACHE = "nexus-missions-v1";
+const MISSIONS_CACHE_KEYS = ["mission-list-recent", "mission-list-my", "mission-list-projects"];
+const MAX_MISSION_CACHE_AGE_MS = 5 * 60 * 1000; // 5 minutes
 const STATIC_ASSETS = [
   "/",
   "/manifest.webmanifest",
@@ -24,16 +28,31 @@ self.addEventListener("fetch", (event) => {
 
   // API calls: network first, fallback to cache
   if (url.pathname.startsWith("/api/")) {
+    // Phase 10: recent missions are cached for offline reading
+    const isMissionList =
+      url.pathname.startsWith("/api/trpc/") &&
+      url.search.includes("missions.list") &&
+      event.request.method === "GET";
     event.respondWith(
       fetch(event.request)
         .then((response) => {
           if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME + "-api").then((cache) => cache.put(event.request, clone));
+            const copy = response.clone();
+            copy.arrayBuffer().then((buffer) => {
+              if (isMissionList) {
+                caches.open(MISSIONS_CACHE).then((cache) =>
+                  cache.put(MISSIONS_CACHE_KEYS[0], new Response(JSON.stringify({ ts: Date.now(), data: buffer }), { headers: { "content-type": "application/json" } }))
+                );
+              } else {
+                caches.open(CACHE_NAME + "-api").then((cache) =>
+                  cache.put(event.request, new Response(buffer, { headers: { "content-type": response.headers.get("content-type") || "application/json" } }))
+                );
+              }
+            });
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match(event.request)))
     );
     return;
   }

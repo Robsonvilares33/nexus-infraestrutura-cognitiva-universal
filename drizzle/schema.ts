@@ -257,3 +257,22 @@ export const pluginVerifications = mysqlTable("pluginVerifications", {
   checkedAt: timestamp("checkedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Phase 10: Threaded plugin discussions — nested replies via parentId
+export const pluginThreads = mysqlTable("pluginThreads", {
+  id: int("id").autoincrement().primaryKey(),
+  pluginId: int("pluginId").notNull(),
+  authorId: int("authorId").notNull(),
+  parentId: int("parentId"),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// Phase 10: XP events — experience awarded for community contributions
+export const xpEvents = mysqlTable("xp_events", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  source: mysqlEnum("source", ["plugin_publish", "review", "mission_complete", "collab_accept"]).notNull(),
+  xp: int("xp").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
