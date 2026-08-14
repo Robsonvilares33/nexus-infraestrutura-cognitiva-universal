@@ -180,10 +180,11 @@ describe("runAgentLoop (Phase 13 — fusão NEXUS × Manus)", () => {
       expect(result.result).toContain("concluído apesar do erro transitório");
       expect(result.confidence).toBe(0.7);
 
-      // The failure was recorded as an observation (tool_error step) — never thrown up
+      // The failure was recorded as an observation (tool_error step) — never thrown up.
+      // The cognitive feed (read by end users) carries a friendly human-readable message.
       const errors = recordedSteps.filter(s => s.stepType === "tool_error");
       expect(errors.length).toBeGreaterThanOrEqual(1);
-      expect(errors.some(e => String(e.detail).includes("banco indisponível"))).toBe(true);
+      expect(errors.some(e => String(e.detail).includes("Falha temporária"))).toBe(true);
 
       // And the mission still reached completed, never stuck
       expect(recordedUpdates.map(u => u.status)).toContain("completed");
