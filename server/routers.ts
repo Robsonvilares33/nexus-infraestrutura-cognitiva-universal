@@ -23,14 +23,18 @@ import {
   getUserProfile, upsertUserProfile, getUserMissionsHistory, getUserInstalledPlugins,
   getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
   addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks,
+  addInAppNotification, markNotificationRead, markAllNotificationsRead, listUserNotifications, countUnreadNotifications,
+  sendEmail, evaluateAchievements, listUserAchievements,
   searchMarketplacePluginsByTerms,
   addSuggestedCategory, voteSuggestedCategory, listSuggestedCategories, approveSuggestedCategory, deleteSuggestedCategory,
   getWeeklyGrowthStats, getUserById,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
-import { sql } from "drizzle-orm";
+import { sql, eq, and, inArray } from "drizzle-orm";
 import { getDb } from "./db";
+import { memory, marketplaceReviews, missions, marketplacePlugins } from "../drizzle/schema";
+import { ACHIEVEMENTS } from "./db";
 
 export const appRouter = router({
   system: systemRouter,
@@ -334,7 +338,7 @@ export const appRouter = router({
       // Trigger mission webhooks in background (fire-and-forget)
       fireMissionWebhooks(missionId, { input: input.input, result: resultText, confidence }).catch(() => {});
 
-      // Send notification about mission completion
+      // Notify (platform owner channel + in-app notification for the user + optional email)
       try {
         const { notifyOwner } = await import("./_core/notification");
         await notifyOwner({
@@ -344,6 +348,9 @@ export const appRouter = router({
       } catch {
         // Notification is optional
       }
+      await addInAppNotification(userId, "mission", "Missão concluída", `Confiança: ${Math.round(confidence * 100)}%. ${input.input.slice(0, 120)}`).catch(() => {});
+      try { if (ctx.user.email) { await sendEmail(ctx.user.email, "NEXUS — Missão concluída", `Sua missão "${input.input.slice(0, 80)}" foi concluída com confiança de ${Math.round(confidence * 100)}%.`); } } catch { /* email is optional */ }
+      evaluateAchievements(userId).catch(() => {});
 
       return { interpretation: interp, tasks: plan.tasks, result: resultText, confidence };
     }),
@@ -390,6 +397,13 @@ export const appRouter = router({
 
         await addMemory(userId, { content: `[Chat] Resposta: ${responseText.slice(0, 200)}`, origin: 'chat', tags: ['chat', 'response'] });
         await addFeedEvent(userId, { eventType: 'result', message: `[Chat] Resposta enviada` });
+
+        // Chat messages count for achievement (each chat message + response = 2 units)
+        const db = await getDb();
+        const chatUnits = db ? (await db.$count(memory, and(eq(memory.userId, userId), eq(memory.origin, 'chat')))) / 2 : 0;
+        if (chatUnits >= 50) {
+          evaluateAchievements(userId).catch(() => {});
+        }
 
         return { response: responseText };
       }),
@@ -719,7 +733,25 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
               title: `[NEXUS] Nova avaliação no seu plugin`,
               content: `Seu plugin "${String(plugin?.name ?? "")}" recebeu uma avaliação de ${input.rating} estrela${input.rating > 1 ? "s" : ""} de ${ctx.user.name || "um usuário"}.${input.comment ? ` Comentário: ${input.comment.slice(0, 200)}` : ""}`,
             }).catch(() => {});
+            await addInAppNotification(
+              author.id,
+              "review",
+              `Nova avaliação: ${String(plugin?.name ?? "")}`,
+              `${input.rating} estrela${input.rating > 1 ? "s" : ""} de ${ctx.user.name || "um usuário"}${input.comment ? `. Comentário: ${input.comment.slice(0, 150)}` : ""}`,
+            ).catch(() => {});
+            try {
+              if (author.email) {
+                await sendEmail(
+                  author.email,
+                  `NEXUS — Nova avaliação no seu plugin`,
+                  `Seu plugin "${String(plugin?.name ?? "")}" recebeu uma avaliação de ${input.rating} estrela${input.rating > 1 ? "s" : ""}.${input.comment ? ` Comentário: ${input.comment.slice(0, 200)}` : ""}`,
+                );
+              }
+            } catch { /* email optional */ }
+            evaluateAchievements(author.id).catch(() => {});
           }
+          // Also evaluate achievements for the reviewer (reviewer activity path uses chat_expert only)
+          evaluateAchievements(ctx.user.id).catch(() => {});
         } catch {
           // Notification is optional, don't fail the review
         }
@@ -840,6 +872,57 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
     listPending: protectedProcedure.query(async () => {
       const cats = await listSuggestedCategories(false);
       return cats.filter(c => !c.isApproved);
+    }),
+  }),
+
+  notifications: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const rows = await listUserNotifications(ctx.user.id);
+      return rows.map(r => ({ ...r }));
+    }),
+    markRead: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await markNotificationRead(input.id, ctx.user.id);
+        return { success: true };
+      }),
+    markAllRead: protectedProcedure.mutation(async ({ ctx }) => {
+      await markAllNotificationsRead(ctx.user.id);
+      return { success: true };
+    }),
+    unreadCount: protectedProcedure.query(async ({ ctx }) => {
+      return countUnreadNotifications(ctx.user.id);
+    }),
+  }),
+
+  achievements: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return { unlocked: [], definitions: ACHIEVEMENTS, progress: {} };
+      const unlockedRows = await listUserAchievements(ctx.user.id);
+      const unlockedKeys = new Set(unlockedRows.map(r => r.badgeKey));
+      // Compute progress percentages
+      const completedMissions = await db.$count(missions, and(eq(missions.userId, ctx.user.id), eq(missions.status, "completed")));
+      const memoryCount = await db.$count(memory, eq(memory.userId, ctx.user.id));
+      const chatUnits = (await db.$count(memory, and(eq(memory.userId, ctx.user.id), eq(memory.origin, "chat")))) / 2;
+      const myPlugins = await db.select().from(marketplacePlugins).where(eq(marketplacePlugins.authorId, ctx.user.id));
+      const myIds = myPlugins.map(p => p.id);
+      const reviewedPlugins = myIds.length > 0 ? await db.selectDistinct({ id: marketplaceReviews.pluginId }).from(marketplaceReviews).where(inArray(marketplaceReviews.pluginId, myIds)) : [];
+      const progress: Record<string, number> = {
+        first_mission: Math.min(1, completedMissions),
+        missions_10: Math.min(1, completedMissions / 10),
+        missions_50: Math.min(1, completedMissions / 50),
+        first_plugin: Math.min(1, myPlugins.length),
+        reviews_5: Math.min(1, reviewedPlugins.length / 5),
+        first_review_received: reviewedPlugins.length >= 1 ? 1 : 0,
+        chat_expert: Math.min(1, chatUnits / 50),
+        memory_master: Math.min(1, memoryCount / 100),
+      };
+      return {
+        unlocked: unlockedRows,
+        definitions: ACHIEVEMENTS.map(def => ({ ...def, unlocked: unlockedKeys.has(def.key), progress: progress[def.key] ?? 0 })),
+        progress,
+      };
     }),
   }),
 });

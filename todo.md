@@ -120,3 +120,22 @@
 - [x] Vitest coverage (categories + admin growth, 36 tests passing)
 - [x] TypeScript clean, screenshots verified (/admin, /marketplace), test categories cleaned from DB
 - [x] Checkpoint + report
+
+## Phase 8 — Notification Center, Real Email, Achievements
+- [ ] in_app_notifications table (userId, type, title, content, read, createdAt)
+- [ ] Apply DB migration
+- [ ] db.ts helpers: addNotification, listUserNotifications, markRead, markAllRead
+- [ ] notifications router (list / markRead / markAllRead / unreadCount)
+- [ ] emit notifyOwner AND persist in-app notification for mission completion + review
+- [ ] Notifications page UI (history list, read toggle, mark all read) + route /notificacoes
+- [ ] Notifications nav item in sidebar
+- [ ] Real email integration (provider choice + env secret)
+- [ ] email helper in server + trigger on mission completion and plugin review
+- [ ] user_achievements table + definitions (first_mission, first_plugin_published, reviews_received, missions_completed_10, ...)
+- [ ] computeAchievements helper (runs after mission complete / review / plugin publish)
+- [ ] achievements router (list + markSeen)
+- [ ] Achievements page UI (badges grid, progress) + route /conquistas
+- [ ] Achievements nav item
+- [ ] Vitest coverage
+- [ ] TypeScript clean + tests passing + screenshots verified
+- [ ] Checkpoint + report
