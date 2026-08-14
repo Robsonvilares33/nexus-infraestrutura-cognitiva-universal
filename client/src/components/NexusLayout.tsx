@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
+  BarChart3, MessageSquare, Package,
   LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -22,6 +23,9 @@ const NAV_ITEMS = [
   { path: "/config", label: "Config", icon: Settings },
   { path: "/status", label: "Status", icon: Activity },
   { path: "/docs", label: "Docs", icon: FileText },
+  { path: "/analytics", label: "Analytics", icon: BarChart3 },
+  { path: "/chat", label: "Chat", icon: MessageSquare },
+  { path: "/marketplace", label: "Marketplace", icon: Package },
 ];
 
 export default function NexusLayout({ children }: { children: React.ReactNode }) {
@@ -31,7 +35,9 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
-  // All hooks must be at top level
+  // Seed the ecosystem once when authenticated.
+  // useMutation must be declared at the top level (before early returns),
+  // so it is declared unconditionally and seeded via a callback ref effect.
   const seededRef = useRef(false);
   const seedMutation = trpc.universe.seed.useMutation();
   useEffect(() => {
@@ -52,7 +58,6 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
       </div>
     );
   }
-
   // Not authenticated — login screen
   if (!isAuthenticated) {
     return (

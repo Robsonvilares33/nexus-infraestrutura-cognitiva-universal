@@ -126,3 +126,22 @@ export const projectShares = mysqlTable("projectShares", {
 
 export type ProjectShare = typeof projectShares.$inferSelect;
 export type InsertProjectShare = typeof projectShares.$inferInsert;
+
+// Marketplace - community-shared plugins
+export const marketplacePlugins = mysqlTable("marketplacePlugins", {
+  id: int("id").autoincrement().primaryKey(),
+  authorId: int("authorId").notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  category: mysqlEnum("category", ["model", "infra", "device", "utility"]).notNull(),
+  description: text("description").notNull(),
+  githubUrl: varchar("githubUrl", { length: 512 }),
+  sourceCode: text("sourceCode"),
+  downloads: int("downloads").default(0).notNull(),
+  upvotes: int("upvotes").default(0).notNull(),
+  version: varchar("version", { length: 32 }).default("1.0.0"),
+  isApproved: boolean("isApproved").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type MarketplacePlugin = typeof marketplacePlugins.$inferSelect;
+export type InsertMarketplacePlugin = typeof marketplacePlugins.$inferInsert;

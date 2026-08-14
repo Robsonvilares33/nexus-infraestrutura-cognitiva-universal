@@ -15,6 +15,9 @@ import Projetos from "./pages/Projetos";
 import Config from "./pages/Config";
 import Status from "./pages/Status";
 import Docs from "./pages/Docs";
+import Analytics from "./pages/Analytics";
+import Chat from "./pages/Chat";
+import Marketplace from "./pages/Marketplace";
 import NexusLayout from "./components/NexusLayout";
 
 function Router() {
@@ -32,6 +35,9 @@ function Router() {
         <Route path="/config" component={Config} />
         <Route path="/status" component={Status} />
         <Route path="/docs" component={Docs} />
+        <Route path="/analytics" component={Analytics} />
+        <Route path="/chat" component={Chat} />
+        <Route path="/marketplace" component={Marketplace} />
         <Route component={NotFound} />
       </Switch>
     </NexusLayout>

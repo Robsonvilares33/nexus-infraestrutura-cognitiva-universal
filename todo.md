@@ -56,3 +56,29 @@
   - DB columns: scheduleCronTaskUid, isScheduled
 - [x] Push notifications for mission completion (both regular and scheduled)
 - [x] Light/dark theme toggle (ThemeProvider switchable + button in header)
+
+## Phase 4 Features
+- [x] Analytics Dashboard with usage charts (missions/day, avg confidence, active agents)
+- [x] Interactive Chat with agents (conversational interface)
+- [x] Plugin Marketplace (share/discover community plugins)
+
+## Phase 4 Follow-up Fixes
+- [x] Add loading, error, and empty states to Analytics page; chart metrics render gracefully with no data
+- [x] Clarify analytics agents metric (labeled "Agentes ativos (eventos de feed)")
+- [x] Fix Chat: render assistant responses reliably from chat.send mutation return value (removed dependency on unemitted socket events) with shared pendingId so typing indicator is always replaced
+- [x] Add vitest coverage for analytics.get and chat.send procedures (16 tests passing)
+- [x] Fix rules-of-hooks violation in NexusLayout (hooks declared after early returns)
+- [x] Fix analytics.get SQL result parsing (db.execute returns [rows, fields])
+
+## Plugin Marketplace
+- [x] Create marketplace_plugins table in drizzle schema (migration 0005 applied)
+- [x] db.ts helpers (list, details, add, downloads, upvote, remove, install)
+- [x] marketplace router (list/details/publish/upvote/install/remove)
+- [x] Marketplace page UI (browse grid, search/category filters, publish dialog, install/upvote)
+- [x] Marketplace in sidebar navigation and App.tsx route
+- [x] Vitest coverage (5 new tests, 21 passing total)
+- [x] Seed 5 community plugins for demonstration
+- [x] Add listMine endpoint for user's published plugins
+- [x] Add detail dialog view (description, source code, GitHub link, stats, remove for owner)
+- [x] Fix Recharts PieChart invalid child (removed stray XAxis)
+- [x] Mobile viewport verified for Analytics, Chat, Marketplace

@@ -2,7 +2,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
-  projectShares,
+  projectShares, marketplacePlugins,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -467,4 +467,114 @@ export async function getMissionByCronTaskUid(taskUid: string) {
     .where(eq(missions.scheduleCronTaskUid, taskUid))
     .limit(1);
   return result.length > 0 ? result[0] : null;
+}
+
+// Marketplace
+export async function listMarketplacePlugins(query?: string, category?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [eq(marketplacePlugins.isApproved, true)];
+  if (query && query.trim()) {
+    const q = `%${query.trim()}%`;
+    conditions.push(sql`(name LIKE ${q} OR description LIKE ${q})`);
+  }
+  if (category && category !== "all") {
+    conditions.push(eq(marketplacePlugins.category, category as any));
+  }
+  return db.select().from(marketplacePlugins)
+    .where(and(...conditions))
+    .orderBy(desc(marketplacePlugins.upvotes), desc(marketplacePlugins.createdAt));
+}
+
+export async function getMarketplacePlugin(pluginId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select()
+    .from(marketplacePlugins)
+    .where(eq(marketplacePlugins.id, pluginId))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function addMarketplacePlugin(userId: number, data: { name: string; category: "model" | "infra" | "device" | "utility"; description: string; githubUrl?: string; sourceCode?: string; version?: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  // Check if plugin with same name already exists from this author
+  const existing = await db.select()
+    .from(marketplacePlugins)
+    .where(and(eq(marketplacePlugins.authorId, userId), eq(marketplacePlugins.name, data.name)))
+    .limit(1);
+  if (existing.length > 0) {
+    throw new Error(`Já existe um plugin com o nome "${data.name}" no seu perfil.`);
+  }
+  const result = await db.insert(marketplacePlugins).values({
+    authorId: userId,
+    name: data.name,
+    category: data.category,
+    description: data.description,
+    githubUrl: data.githubUrl || null,
+    sourceCode: data.sourceCode || null,
+    version: data.version || "1.0.0",
+  });
+  return result;
+}
+
+export async function incrementMarketplaceDownloads(pluginId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const existing = await getMarketplacePlugin(pluginId);
+  if (!existing) return null;
+  return db.update(marketplacePlugins)
+    .set({ downloads: existing.downloads + 1 })
+    .where(eq(marketplacePlugins.id, pluginId));
+}
+
+export async function upvoteMarketplacePlugin(pluginId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const existing = await getMarketplacePlugin(pluginId);
+  if (!existing) return null;
+  return db.update(marketplacePlugins)
+    .set({ upvotes: existing.upvotes + 1 })
+    .where(eq(marketplacePlugins.id, pluginId));
+}
+
+export async function removeMarketplacePlugin(userId: number, pluginId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.delete(marketplacePlugins)
+    .where(and(eq(marketplacePlugins.authorId, userId), eq(marketplacePlugins.id, pluginId)));
+}
+
+// Install a marketplace plugin into the user's own plugins table
+export async function installMarketplacePlugin(userId: number, pluginId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const mp = await getMarketplacePlugin(pluginId);
+  if (!mp) throw new Error("Plugin não encontrado no marketplace.");
+  // Check if already installed
+  const existing = await db.select()
+    .from(plugins)
+    .where(and(eq(plugins.userId, userId), eq(plugins.name, mp.name)))
+    .limit(1);
+  if (existing.length > 0) {
+    return db.update(plugins)
+      .set({ connected: true })
+      .where(and(eq(plugins.userId, userId), eq(plugins.name, mp.name)));
+  }
+  return db.insert(plugins).values({
+    userId,
+    name: mp.name,
+    category: mp.category === "utility" ? "infra" : (mp.category as any),
+    connected: true,
+    version: mp.version || "1.0.0",
+  });
+}
+
+export async function getMyMarketplacePlugins(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(marketplacePlugins)
+    .where(eq(marketplacePlugins.authorId, userId))
+    .orderBy(desc(marketplacePlugins.createdAt));
 }
