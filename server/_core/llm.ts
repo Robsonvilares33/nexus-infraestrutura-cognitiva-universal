@@ -299,6 +299,20 @@ const computeBackoffDelay = (
 
 // Retries non-2xx responses and network errors with exponential backoff, then
 // returns the final Response so callers keep their existing error handling.
+const LLM_REQUEST_TIMEOUT_MS = 120_000;
+
+// fetchWithTimeout wraps a fetch in an AbortController-based deadline so a
+// misbehaving upstream can never pin the agent loop forever.
+const fetchWithTimeout = async (url: string, init: FetchInit): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const fetchWithBackoff = async (
   url: string,
   init: FetchInit
@@ -307,7 +321,7 @@ const fetchWithBackoff = async (
 
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url, init);
+      const response = await fetchWithTimeout(url, init);
       if (response.ok || attempt === RETRY_MAX_RETRIES) {
         return response;
       }
@@ -326,6 +340,9 @@ const fetchWithBackoff = async (
       await sleep(computeBackoffDelay(attempt, retryAfterMs));
     } catch (error) {
       lastError = error;
+      if (error instanceof Error && (error.name === "AbortError" || /timeout/i.test(error.message))) {
+        console.error(`LLM request timed out after ${LLM_REQUEST_TIMEOUT_MS / 1000}s`);
+      }
       if (attempt === RETRY_MAX_RETRIES) throw error;
       console.warn(
         `LLM request retry ${attempt + 1}/${RETRY_MAX_RETRIES} after network error`
