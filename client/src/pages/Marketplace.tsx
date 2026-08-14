@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   Plug, Search, Plus, Heart, Download, ExternalLink, Github, Trash2,
-  Package, Loader2,
+  Package, Loader2, Star,
 } from "lucide-react";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -41,6 +41,21 @@ export default function Marketplace() {
     { enabled: detailId !== null },
   );
   const { data: me } = trpc.auth.me.useQuery();
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const { data: reviews } = trpc.marketplace.reviews.useQuery(
+    { pluginId: detailId ?? 0 },
+    { enabled: detailId !== null },
+  );
+  const addReviewMutation = trpc.marketplace.addReview.useMutation({
+    onSuccess: () => {
+      toast.success("Avaliação registrada!");
+      setReviewComment("");
+      utils.marketplace.reviews.invalidate();
+      utils.marketplace.list.invalidate();
+    },
+    onError: (e) => toast.error(e.message || "Erro ao registrar avaliação"),
+  });
   const [form, setForm] = useState({
     name: "",
     category: "utility" as "model" | "infra" | "device" | "utility",
@@ -310,6 +325,77 @@ export default function Marketplace() {
                 </DialogDescription>
               </DialogHeader>
               <p className="text-[11px] font-mono text-[#aab4d6] whitespace-pre-wrap">{detail.description}</p>
+
+              {/* Rating + reviews */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-0.5">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Star
+                        key={i}
+                        className={`h-3.5 w-3.5 ${i < Math.round(reviews?.averageRating || 0) ? "text-[#ffd479] fill-[#ffd479]" : "text-[#3a4360]"}`}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-[9px] font-mono text-[#7684a0]">
+                    {(reviews?.averageRating || 0).toFixed(1)} · {reviews?.reviewCount || 0} avaliação(ões)
+                  </span>
+                </div>
+                {reviews?.reviews && reviews.reviews.length > 0 && (
+                  <div className="space-y-1.5 max-h-32 overflow-auto">
+                    {reviews.reviews.map(r => (
+                      <div key={r.id} className="bg-[rgba(3,5,14,0.8)] border border-[rgba(150,175,220,0.1)] p-2">
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`h-2.5 w-2.5 ${i < r.rating ? "text-[#ffd479] fill-[#ffd479]" : "text-[#3a4360]"}`}
+                            />
+                          ))}
+                          <span className="text-[8px] font-mono text-[#7684a0] ml-1">
+                            Usuário #{r.userId} · {new Date(r.createdAt).toLocaleDateString("pt-BR")}
+                          </span>
+                        </div>
+                        {r.comment ? <p className="text-[10px] font-mono text-[#aab4d6] mt-1">{r.comment}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-0.5">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setReviewRating(i + 1)}
+                        className="p-0.5"
+                        aria-label={`Nota ${i + 1}`}
+                      >
+                        <Star
+                          className={`h-4 w-4 transition-colors ${i < reviewRating ? "text-[#ffd479] fill-[#ffd479]" : "text-[#3a4360] hover:text-[#ffd479]/60"}`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                  <Input
+                    value={reviewComment}
+                    onChange={e => setReviewComment(e.target.value)}
+                    placeholder="Deixe um comentário (opcional)"
+                    className="bg-[rgba(3,5,14,0.8)] border-[rgba(150,175,220,0.12)] text-[#e2e8f4] text-[10px] font-mono flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (!detailId) return;
+                      addReviewMutation.mutate({ pluginId: detailId, rating: reviewRating, comment: reviewComment });
+                    }}
+                    disabled={addReviewMutation.isPending}
+                    className="h-7 text-[10px] font-mono bg-[#ffd479]/10 text-[#ffd479] border border-[#ffd479]/20 hover:bg-[#ffd479]/20"
+                  >
+                    {addReviewMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "AVALIAR"}
+                  </Button>
+                </div>
+              </div>
               {detail.sourceCode && (
                 <div className="space-y-1">
                   <label className="text-[9px] font-mono text-[#7684a0] tracking-wider">CÓDIGO-FONTE</label>

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
-  BarChart3, MessageSquare, Package,
+  BarChart3, MessageSquare, Package, ShieldCheck,
   LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -26,6 +26,10 @@ const NAV_ITEMS = [
   { path: "/analytics", label: "Analytics", icon: BarChart3 },
   { path: "/chat", label: "Chat", icon: MessageSquare },
   { path: "/marketplace", label: "Marketplace", icon: Package },
+];
+
+const ADMIN_NAV_ITEMS = [
+  { path: "/admin", label: "Admin", icon: ShieldCheck },
 ];
 
 export default function NexusLayout({ children }: { children: React.ReactNode }) {
@@ -108,6 +112,28 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
             </Link>
           );
         })}
+        {user?.role === "admin" && (
+          <div className="pt-3 border-t border-[rgba(150,175,220,0.06)] mt-3">
+            {ADMIN_NAV_ITEMS.map(item => {
+              const isActive = location === item.path;
+              return (
+                <Link key={item.path} href={item.path}>
+                  <button
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                      isActive
+                        ? "bg-[rgba(63,231,176,0.08)] text-[#3fe7b0] border border-[rgba(63,231,176,0.15)]"
+                        : "text-[#7684a0] hover:text-[#aab4d6] hover:bg-[rgba(255,255,255,0.02)]"
+                    } ${collapsed ? "justify-center" : ""}`}
+                    title={item.label}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    {!collapsed && <span className="font-mono">{item.label}</span>}
+                  </button>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       {/* User */}

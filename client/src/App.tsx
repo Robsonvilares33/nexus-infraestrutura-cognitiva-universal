@@ -18,6 +18,7 @@ import Docs from "./pages/Docs";
 import Analytics from "./pages/Analytics";
 import Chat from "./pages/Chat";
 import Marketplace from "./pages/Marketplace";
+import Admin from "./pages/Admin";
 import NexusLayout from "./components/NexusLayout";
 
 function Router() {
@@ -38,6 +39,7 @@ function Router() {
         <Route path="/analytics" component={Analytics} />
         <Route path="/chat" component={Chat} />
         <Route path="/marketplace" component={Marketplace} />
+        <Route path="/admin" component={Admin} />
         <Route component={NotFound} />
       </Switch>
     </NexusLayout>

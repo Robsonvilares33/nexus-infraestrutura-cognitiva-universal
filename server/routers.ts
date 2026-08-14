@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import {
   getDashboardStats, seedPlugins, seedModels, seedAgents,
   getPlugins, updatePluginConnection, upsertPlugin,
@@ -18,6 +18,8 @@ import {
   listMarketplacePlugins, getMarketplacePlugin, addMarketplacePlugin,
   incrementMarketplaceDownloads, upvoteMarketplacePlugin, removeMarketplacePlugin, installMarketplacePlugin,
   getMyMarketplacePlugins,
+  addMarketplaceReview, getMarketplaceReviews, ensureMarketplaceInstall,
+  listAllUsers, updateUserRole, setMarketplacePluginApproved, listAllMarketplacePlugins, deleteAnyMarketplacePlugin, getPlatformStats,
 } from "./db";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
@@ -641,6 +643,43 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         return { success: true };
       }),
     listMine: protectedProcedure.query(async ({ ctx }) => getMyMarketplacePlugins(ctx.user.id)),
+    addReview: protectedProcedure
+      .input(z.object({
+        pluginId: z.number(),
+        rating: z.number().int().min(1).max(5),
+        comment: z.string().max(1000).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await addMarketplaceReview(ctx.user.id, input.pluginId, input.rating, input.comment || "");
+        return { success: true };
+      }),
+    reviews: protectedProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .query(async ({ input }) => getMarketplaceReviews(input.pluginId)),
+  }),
+
+  admin: router({
+    stats: adminProcedure.query(async () => getPlatformStats()),
+    listUsers: adminProcedure.query(async () => listAllUsers()),
+    setRole: adminProcedure
+      .input(z.object({ userId: z.number(), role: z.enum(["user", "admin"]) }))
+      .mutation(async ({ input }) => {
+        await updateUserRole(input.userId, input.role);
+        return { success: true };
+      }),
+    listPlugins: adminProcedure.query(async () => listAllMarketplacePlugins()),
+    approvePlugin: adminProcedure
+      .input(z.object({ pluginId: z.number(), isApproved: z.boolean() }))
+      .mutation(async ({ input }) => {
+        await setMarketplacePluginApproved(input.pluginId, input.isApproved);
+        return { success: true };
+      }),
+    deletePlugin: adminProcedure
+      .input(z.object({ pluginId: z.number() }))
+      .mutation(async ({ input }) => {
+        await deleteAnyMarketplacePlugin(input.pluginId);
+        return { success: true };
+      }),
   }),
 });
 export type AppRouter = typeof appRouter;
