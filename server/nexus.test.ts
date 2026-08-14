@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { verifyPluginSource, getDb, removeMarketplacePlugin, getReputationLevel, getNextLevel, setNotificationPushCallback } from "./db";
+import { sql } from "drizzle-orm";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
@@ -816,3 +817,14 @@ describe("notification push callback (Phase 11)", () => {
     expect(true).toBe(true);
   });
 });
+
+// Self-cleaning: wipe any test markers this suite leaves behind so the live
+// database (and the real-time cognitive feed) stays free of vitest artifacts.
+async function wipeVitestArtifacts() {
+  const db = await getDb();
+  if (!db) return;
+  await db.execute("DELETE FROM cognitiveFeed WHERE userId = 1 AND message LIKE '%vitest%'");
+}
+
+afterEach(() => wipeVitestArtifacts());
+afterAll(() => wipeVitestArtifacts());
