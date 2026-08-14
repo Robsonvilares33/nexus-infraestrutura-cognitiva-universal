@@ -27,7 +27,7 @@ cd nexus-infraestrutura-cognitiva-universal
 pnpm install
 
 # Configure as variáveis de ambiente (copie o template)
-cp docs/ENV-TEMPLATE.md .env.local   # renomeie o conteúdo para .env conforme seu ambiente
+cp docs/ENV-TEMPLATE.md .env   # edite o .env com seus valores
 
 # Inicie o banco local (ver seção 3) e crie as tabelas
 pnpm drizzle-kit push                # aplica o schema do Drizzle ao banco

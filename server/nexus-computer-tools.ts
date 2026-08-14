@@ -51,7 +51,7 @@ export function resolveSafePath(userId: number, relativePath: string): string {
 
 const BLOCKED_PATTERNS: RegExp[] = [
   /\bsudo\b/, /\bsu\b(\s|$)/, /\bchmod\s+777\b/, /\bchmod\s+-R\s+777\b/,
-  /:\(\)\{\s*:\|\:&\s*\};:/, /\brm\s+(-[a-zA-Z]*r)?\s*-?[a-zA-Z]*\s*\/\b/,
+  /:\(\)\{\s*:\|\:&\s*\};:/, /\brm\b.*\s\/(\s|$)/,
   /\brm\s+(-[a-zA-Z]*)?\s*\/etc\b/, /\brm\s+(-[a-zA-Z]*)?\s*\/bin\b/,
   /\brm\s+(-[a-zA-Z]*)?\s*\/usr\b/, /\brm\s+(-[a-zA-Z]*)?\s*\/home\b/,
   /\bdd\s+if=\/dev\//, /\bmkfs\./, /\bmount\b/, /\bumount\b/,
