@@ -144,3 +144,12 @@
 - [x] Frontend: Selo "Verificado" in Marketplace cards/details with verification status
 - [x] Vitest coverage for collaboration + verification (48/48 tests passing) flows
 - [x] Screenshots verified, checkpoint + report
+
+## Phase 10 — Threads em Plugins, Leaderboard XP, Cache Offline PWA
+- [ ] plugin_threads table (aninhadas: parentId) + xp_events/leaderboard via user_achievements ou coluna xp em users
+- [ ] Backend: thread create/reply/list (aninhado), award XP on publish/review/collab, leaderboard query
+- [ ] XP ganho por: publicar plugin, review, missão concluída, colaboração aceita
+- [ ] Frontend: aba Discussão no detalhe do plugin com respostas aninhadas
+- [ ] Frontend: página/ab Leaderboard com ranking XP
+- [ ] SW cache offline de missões recentes + indicador offline
+- [ ] Vitest coverage + screenshots + checkpoint + GitHub sync
