@@ -28,7 +28,7 @@ self.addEventListener("fetch", (event) => {
 
   // API calls: network first, fallback to cache
   if (url.pathname.startsWith("/api/")) {
-    // Phase 10: recent missions are cached for offline reading
+    // Phase 10: recent missions are cached for offline reading (cached response body, not wrapped)
     const isMissionList =
       url.pathname.startsWith("/api/trpc/") &&
       url.search.includes("missions.list") &&
@@ -40,9 +40,8 @@ self.addEventListener("fetch", (event) => {
             const copy = response.clone();
             copy.arrayBuffer().then((buffer) => {
               if (isMissionList) {
-                caches.open(MISSIONS_CACHE).then((cache) =>
-                  cache.put(MISSIONS_CACHE_KEYS[0], new Response(JSON.stringify({ ts: Date.now(), data: buffer }), { headers: { "content-type": "application/json" } }))
-                );
+                const entry = new Response(buffer, { headers: { "content-type": response.headers.get("content-type") || "application/json", "x-nexus-cached-at": String(Date.now()) } });
+                caches.open(MISSIONS_CACHE).then((cache) => cache.put(MISSIONS_CACHE_KEYS[0], entry));
               } else {
                 caches.open(CACHE_NAME + "-api").then((cache) =>
                   cache.put(event.request, new Response(buffer, { headers: { "content-type": response.headers.get("content-type") || "application/json" } }))
@@ -52,7 +51,26 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => caches.match(event.request).then((cached) => cached || caches.match(event.request)))
+        .catch(async () => {
+          if (isMissionList) {
+            // Serve cached recent missions offline (within freshness window)
+            const offline = await caches.open(MISSIONS_CACHE);
+            const entry = await offline.match(MISSIONS_CACHE_KEYS[0]);
+            if (entry) {
+              const cachedAt = Number(entry.headers.get("x-nexus-cached-at") || 0);
+              if (Date.now() - cachedAt < MAX_MISSION_CACHE_AGE_MS) {
+                const clone = await entry.clone();
+                const buffer = await clone.arrayBuffer();
+                return new Response(buffer, { headers: { "content-type": entry.headers.get("content-type") || "application/json", "x-nexus-offline": "true" } });
+              }
+            }
+          }
+          const generic = await caches.match(event.request);
+          return generic || new Response("{\"json\":null,\"error\":{\"json\":{\"message\":\"offline\"}}}", {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          });
+        })
     );
     return;
   }

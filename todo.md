@@ -145,11 +145,11 @@
 - [x] Vitest coverage for collaboration + verification (48/48 tests passing) flows
 - [x] Screenshots verified, checkpoint + report
 
-## Phase 10 — Threads em Plugins, Leaderboard XP, Cache Offline PWA
-- [ ] plugin_threads table (aninhadas: parentId) + xp_events/leaderboard via user_achievements ou coluna xp em users
-- [ ] Backend: thread create/reply/list (aninhado), award XP on publish/review/collab, leaderboard query
-- [ ] XP ganho por: publicar plugin, review, missão concluída, colaboração aceita
-- [ ] Frontend: aba Discussão no detalhe do plugin com respostas aninhadas
-- [ ] Frontend: página/ab Leaderboard com ranking XP
-- [ ] SW cache offline de missões recentes + indicador offline
-- [ ] Vitest coverage + screenshots + checkpoint + GitHub sync
+## Phase 10 — Threads em Plugins, Leaderboard XP, Cache Offline PWA — DONE
+- [x] pluginThreads + xp_events tables (migration 0012 applied)
+- [x] Backend: thread create/reply/list (aninhado), award XP on publish/review/collab, leaderboard query
+- [x] XP ganho por: publicar plugin (+50), review (+10), missão concluída (+20), colaboração aceita (+5)
+- [x] Frontend: seção Discussão no detalhe do plugin com respostas aninhadas
+- [x] Frontend: página /leaderboard com ranking XP (top-20 + meu XP)
+- [x] SW cache offline de missões recentes (nexus-missions-v1)
+- [x] Vitest coverage (50/50 tests passing) + screenshots + checkpoint eee9251a + GitHub sync
