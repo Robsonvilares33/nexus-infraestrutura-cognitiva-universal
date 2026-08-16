@@ -158,6 +158,12 @@ async function startServer() {
       // Set executing status
       await updateMission(user.id, missionId, { status: 'executing', startedAt: new Date() });
       await addFeedEvent(user.id, { eventType: 'mission', message: `[Agendada] Missão executando: ${mission.input.slice(0, 100)}`, missionId });
+      // Streaming ao vivo do feed cognitivo (mesmo canal do console do agente)
+      try {
+        const { broadcastCognitiveEvent, broadcastMissionUpdate } = await import("../socket");
+        broadcastMissionUpdate(String(user.id), missionId, "executing");
+        broadcastCognitiveEvent(String(user.id), "mission", `[Agendada] Missão executando: ${mission.input.slice(0, 100)}`, { missionId });
+      } catch { /* socket opcional */ }
 
       // Quick execution for scheduled missions
       const result = await invokeLLM({
@@ -176,6 +182,12 @@ async function startServer() {
       await addMemory(user.id, { content: `[Agendada] Missão: ${mission.input.slice(0, 200)}\nResultado: ${resultText}`, confidence, origin: 'scheduled', tags: ['scheduled', 'mission'] });
       await updateMission(user.id, missionId, { status: 'completed', result: resultText, confidence, completedAt: new Date() });
       await addFeedEvent(user.id, { eventType: 'complete', message: `[Agendada] Missão concluída — confiança: ${Math.round(confidence * 100)}%`, missionId, confidence });
+      // Streaming ao vivo do feed cognitivo ao concluir
+      try {
+        const { broadcastCognitiveEvent, broadcastMissionUpdate } = await import("../socket");
+        broadcastMissionUpdate(String(user.id), missionId, "completed", { confidence });
+        broadcastCognitiveEvent(String(user.id), "complete", `[Agendada] Missão concluída — confiança: ${Math.round(confidence * 100)}%`, { missionId, confidence });
+      } catch { /* socket opcional */ }
 
       // Send notification to user about mission completion
       try {
