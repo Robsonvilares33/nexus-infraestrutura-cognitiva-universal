@@ -10,6 +10,18 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
+// Phase 17 fix: the dev server runs Vite + Express in the same process, so every
+// tsx-watch backend restart re-instantiates Vite and may regenerate the
+// prebundle content hash for react/* deps. A browser tab that still holds the
+// old module graph mixes the stale react identity with the new one → "Invalid
+// hook call". The Vite HMR client emits a `full-reload` message on reconnect
+// after a server restart; honoring it forces a fresh module graph.
+if (import.meta.hot) {
+  import.meta.hot.on("vite:beforeFullReload", () => {
+    window.location.reload();
+  });
+}
+
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
@@ -73,7 +85,10 @@ const trpcClient = trpc.createClient({
 });
 
 // Register service worker for PWA support (app installable on mobile/desktop)
-if ("serviceWorker" in navigator && window.isSecureContext === true) {
+// PWA service worker: register only in production builds. In dev mode the SW
+// can cache a stale Vite module graph (old prebundle hashes), which mixes two
+// React identities in the same page and triggers "Invalid hook call".
+if ("serviceWorker" in navigator && window.isSecureContext === true && !import.meta.env.DEV) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {
       // Non-fatal: app works fine without SW
