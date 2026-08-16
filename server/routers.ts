@@ -23,7 +23,7 @@ import {
   listAllUsers, updateUserRole, setMarketplacePluginApproved, listAllMarketplacePlugins, deleteAnyMarketplacePlugin, getPlatformStats,
   getUserProfile, upsertUserProfile, getUserMissionsHistory, getUserInstalledPlugins,
   getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
-  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks,
+  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks, testFireMissionWebhook,
   addInAppNotification, markNotificationRead, markAllNotificationsRead, listUserNotifications, countUnreadNotifications,
   sendEmail, evaluateAchievements, listUserAchievements, markAchievementsSeen,
   searchMarketplacePluginsByTerms,
@@ -1104,21 +1104,12 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         await removeMissionWebhook(input.webhookId, ctx.user.id);
         return { success: true };
       }),
-    // Fase 19: disparo manual de teste — usa payload de exemplo da missão e registra lastStatus
+    // Fase 19 — teste manual de um webhook (payload de exemplo, timeout fail-fast de 5s)
     testFire: protectedProcedure
-      .input(z.object({ missionId: z.number() }))
+      .input(z.object({ missionId: z.number(), webhookId: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        const db = await getDb();
-        if (!db) throw new Error("Banco de dados indisponível");
-        const m = await db.select().from(missions).where(eq(missions.id, input.missionId)).limit(1);
-        if (m.length === 0 || m[0].userId !== ctx.user.id) throw new Error("Missão não encontrada ou não pertence a você");
-        await fireMissionWebhooks(input.missionId, {
-          input: m[0].input ?? "Teste de webhook — NEXUS",
-          result: "Teste manual de disparo — payload de exemplo do NEXUS",
-          confidence: Number(m[0].confidence ?? 0.85),
-          test: true,
-        });
-        return { success: true };
+        const result = await testFireMissionWebhook(input.missionId, input.webhookId, ctx.user.id);
+        return result;
       }),
   }),
 

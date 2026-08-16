@@ -94,6 +94,7 @@ export async function notifyOwner(
         "connect-protocol-version": "1",
       },
       body: JSON.stringify({ title, content }),
+      // Fase 19 — fail-fast: timeout de 5s para APIs externas nunca travarem o sistema
       signal: AbortSignal.timeout(5000),
     });
 

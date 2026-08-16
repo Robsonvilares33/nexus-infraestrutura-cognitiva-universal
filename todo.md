@@ -238,11 +238,14 @@
 - [x] Vitest coverage para o chat multiagente (nexus-multichat.test.ts, 7/7)
 - [x] Sync GitHub (PR #7) + checkpoint publicado
 
-## Fase 19: Webhooks por missão + modo offline + streaming no chat
-- [x] Backend: webhooks.testFire (disparo manual com payload de exemplo + retorno do lastStatus/lastTriggeredAt); UI mostra último disparo com data e botão "Testar"
-- [x] Frontend: UI de webhooks por missão em Minha IA já existe (diálogo por missão com add/list/remove + HTTP status) — adicionado botão Testar + data do último disparo
-- [x] Modo offline: service worker estende cache para missões + notas da Super Memória (com header x-nexus-offline)
-- [x] Frontend: modo offline real — lista de missões e notas revisável sem conexão
-- [x] Streaming SSE no chat multiagente (GET /api/chat/ask-stream com eventos chunk/done, renderização ao vivo corrigida + fallback síncrono tRPC)
-- [x] Vitest coverage para as três capacidades (webhooks.testFire + chunking SSE)
-- [x] README Fase 19 + checkpoint + sync GitHub (PR #8)
+## Fase 19: Webhooks interativos, modo offline e chat em streaming
+- [x] Backend: webhooks.testFire (disparo manual de payload de exemplo ao endpoint externo; grava lastStatus/lastTriggeredAt; verificação de propriedade; falha com lastStatus=0 se endpoint não responder)
+- [x] Backend: fail-fast 5s (AbortSignal.timeout) em testFire, fireMissionWebhooks, notifyOwner e sendEmail — endpoints lentos não travam o sistema
+- [x] Backend: SSE /api/chat/ask-stream (autentica cookie/Bearer; emite context/chunk/done; chunks sintéticos 8 chars/15ms; registro de memória+feed em background)
+- [x] Frontend: chat multiagente com streaming SSE (efeito de digitação; bolha sai do "pensando..." no primeiro chunk; fallback tRPC automático; toggle Streaming; indicador online/offline)
+- [x] Frontend: SW offline — Super Memória 30 min (nexus-memory-v1) + Feed 10 min (nexus-feed-v1) + header x-nexus-offline
+- [x] Frontend: guard dev remove SW residual e limpa caches do PWA (fim definitivo do "Invalid hook call")
+- [x] Frontend: Minha IA — botão Testar webhook + exibição de último disparo (HTTP + timestamp)
+- [x] Vitest coverage (nexus-webhooks-f19.test.ts, 5/5 incluindo fail-fast 5s) — 120/122 passando (2 cota externa 412)
+- [x] README.md com seção Fase 19
+- [ ] Sync GitHub (branch sync-fase19b + PR #8)

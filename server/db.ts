@@ -974,6 +974,41 @@ export async function removeMissionWebhook(webhookId: number, userId: number) {
   return db.delete(missionWebhooks).where(eq(missionWebhooks.id, webhookId));
 }
 
+// Fail-fast: disparos externos com timeout curto para nunca travar o sistema
+const WEBHOOK_TEST_TIMEOUT_MS = 5000;
+
+// Fase 19 — teste manual de um webhook de missão (payload de exemplo).
+// Retorna o status HTTP obtido e o último disparo registrado.
+export async function testFireMissionWebhook(missionId: number, webhookId: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const hooks = await db.select().from(missionWebhooks).where(eq(missionWebhooks.id, webhookId)).limit(1);
+  if (hooks.length === 0) throw new Error("Webhook não encontrado");
+  const hook = hooks[0];
+  const m = await db.select().from(missions).where(eq(missions.id, hook.missionId)).limit(1);
+  if (!m[0] || m[0].userId !== userId) throw new Error("Webhook não pertence a você");
+  const startedAt = Date.now();
+  let lastStatus: number = 0;
+  try {
+    const res = await fetch(hook.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "NEXUS-MissionWebhook/1.0" },
+      body: JSON.stringify({ missionId: hook.missionId, event: "webhook.test", payload: { test: true, note: "Disparo manual de teste (NEXUS)" }, timestamp: new Date().toISOString() }),
+      signal: AbortSignal.timeout(WEBHOOK_TEST_TIMEOUT_MS),
+    });
+    lastStatus = res.status;
+  } catch (err) {
+    // Timeout (5s) ou falha de rede: status 0 indica que o endpoint não respondeu
+    lastStatus = 0;
+    void err;
+  }
+  const lastTriggeredAt = new Date();
+  await db.update(missionWebhooks)
+    .set({ lastStatus, lastTriggeredAt })
+    .where(eq(missionWebhooks.id, webhookId));
+  return { webhookId, missionId: hook.missionId, lastStatus, lastTriggeredAt, elapsedMs: Date.now() - startedAt };
+}
+
 export async function fireMissionWebhooks(missionId: number, payload: Record<string, unknown>) {
   const db = await getDb();
   if (!db) return;
@@ -1185,6 +1220,7 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
         subject,
         html: `<h2>${subject.replace(/</g, "&lt;")}</h2><p>${body.replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>`,
       }),
+      // Fase 19 — fail-fast: timeout de 5s para APIs externas nunca travarem o sistema
       signal: AbortSignal.timeout(5000),
     });
     return res.ok;

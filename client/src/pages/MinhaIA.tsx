@@ -189,17 +189,20 @@ export default function MinhaIA() {
     onSuccess: () => refetchWebhooks(),
     onError: e => toast.error(e.message || "Erro ao remover webhook"),
   });
+  // Fase 19 — teste manual de um webhook (payload de exemplo, timeout de 5s)
   const testFireMutation = trpc.webhooks.testFire.useMutation({
-    onSuccess: () => {
-      toast.success("Disparo de teste enviado! Confira o status HTTP abaixo.");
+    onSuccess: res => {
+      if (res.lastStatus >= 200 && res.lastStatus < 300) {
+        toast.success(`Webhook testado com sucesso — HTTP ${res.lastStatus} (${res.elapsedMs}ms)`);
+      } else if (res.lastStatus === 0) {
+        toast.error("Webhook não respondeu (falha de rede ou timeout de 5s)");
+      } else {
+        toast.warning(`Webhook respondeu com HTTP ${res.lastStatus} (${res.elapsedMs}ms)`);
+      }
       refetchWebhooks();
     },
-    onError: e => toast.error(e.message || "Erro no disparo de teste"),
+    onError: e => toast.error(e.message || "Erro ao testar webhook"),
   });
-  const handleTestFire = (missionId: number) => {
-    if (testFireMutation.isPending) return;
-    testFireMutation.mutate({ missionId });
-  };
 
   const handleAddWebhook = () => {
     if (!hookMissionId || !hookUrl.trim()) {
@@ -695,18 +698,6 @@ export default function MinhaIA() {
                         URLs externas acionadas automaticamente quando esta missão é executada.
                       </DialogDescription>
                     </DialogHeader>
-                    <DialogFooter className="pt-1 border-t border-[rgba(150,175,220,0.08)]">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleTestFire(m.id)}
-                        disabled={testFireMutation.isPending}
-                        className="bg-[rgba(63,231,176,0.08)] text-[#3fe7b0] border border-[#3fe7b0]/30 hover:bg-[#3fe7b0]/15 text-[10px] font-mono"
-                      >
-                        <Zap className="h-3 w-3" />
-                        {testFireMutation.isPending ? "TESTANDO..." : "TESTAR DISPARO"}
-                      </Button>
-                    </DialogFooter>
                     <div className="space-y-3">
                       <div className="flex gap-2">
                         <Input
@@ -735,9 +726,24 @@ export default function MinhaIA() {
                               {h.lastStatus !== null && h.lastStatus !== undefined && (
                                 <span className={`text-[8px] font-mono px-1.5 py-0.5 border shrink-0 ${h.lastStatus >= 200 && h.lastStatus < 300 ? "text-[#3fe7b0] border-[rgba(63,231,176,0.25)]" : "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]"}`}>
                                   HTTP {h.lastStatus}
-                                  {h.lastTriggeredAt ? ` · ${new Date(h.lastTriggeredAt).toLocaleString("pt-BR")}` : ""}
                                 </span>
                               )}
+                              {h.lastTriggeredAt !== null && h.lastTriggeredAt !== undefined && (
+                                <span className="text-[8px] font-mono text-[#7684a0] whitespace-nowrap shrink-0" title={String(h.lastTriggeredAt)}>
+                                  {new Date(h.lastTriggeredAt as Date | string).toLocaleString("pt-BR")}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => {
+                                  if (!hookMissionId) return;
+                                  testFireMutation.mutate({ missionId: hookMissionId, webhookId: h.id });
+                                }}
+                                disabled={testFireMutation.isPending}
+                                className="text-[#7cf3ff] hover:text-[#7cf3ff]/80 transition-colors shrink-0 disabled:opacity-40"
+                                title="Fase 19 — testar webhook manualmente (payload de exemplo)"
+                              >
+                                <Terminal className="h-3 w-3" />
+                              </button>
                               <button
                                 onClick={() => removeWebhookMutation.mutate({ webhookId: h.id })}
                                 className="text-[#ff7a8c] hover:text-[#ff7a8c]/80 transition-colors shrink-0"

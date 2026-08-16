@@ -172,22 +172,18 @@ Nova página de conversa contínua (`/chat-multiagente`) em que o usuário escol
 
 Nenhuma variável nova é necessária: o chat reutiliza `QWEN_API_KEY` (embeddings) e as preferências de LLM armazenadas em `userLlmSettings`. Testes: `server/nexus-multichat.test.ts` (LLM, banco e embeddings mockados, 7/7 passando).
 
-## Fase 19: Webhooks com teste manual, modo offline e streaming do chat
+## Fase 19: Webhooks interativos, modo offline e chat em streaming
 
-Esta fase adicionou três capacidades de produção ao NEXUS: disparo manual de webhooks com feedback imediato, acesso offline à Super Memória e ao feed cognitivo via service worker, e streaming em tempo real das respostas do chat multiagente com fallback síncrono.
+Três frentes de amadurecimento operacional: teste manual de webhooks, funcionamento offline de dados recorrentes e respostas ao vivo no chat multiagente.
 
-| Recurso | Descrição |
+| Capacidade | Descrição |
 |---|---|
-| Teste de webhook | Novo procedimento `webhooks.testFire`: envia o payload de exemplo ao endpoint e grava `lastStatus` + `lastTriggeredAt`. Na UI (Minha IA), o botão **Testar** mostra o resultado do último disparo com data |
-| Offline: Super Memória | O service worker (`client/public/sw.js`) passa a cachear a lista de notas da Super Memória com frescor de 30 minutos e responde com o header `x-nexus-offline: true` |
-| Offline: feed cognitivo | O feed é cacheado pelo service worker com frescor de 10 minutos, permitindo revisar a atividade recente sem conexão |
-| Streaming SSE do chat | Novo endpoint `GET /api/chat/ask-stream` emite eventos `chunk` (texto ao vivo) e `done` (agente, notas RAG); o frontend renderiza caractere por caractere e cai automaticamente para o tRPC síncrono em caso de erro ou indisponibilidade |
-| Resiliência de side-effects | `notifyOwner` (5s) e `sendEmail` (5s) agora têm timeout de falha rápida, impedindo que gateways externos lentos travem ações do usuário e testes |
+| Webhook manual (`webhooks.testFire`) | Botão "Testar" no diálogo de webhooks da missão dispara um payload de exemplo (`event: webhook.test`, com `payload.test: true` e metadados da missão) ao endpoint externo; grava `lastStatus`/`lastTriggeredAt` visíveis na UI e retorna `elapsedMs` |
+| Fail-fast 5s | O disparo de webhook e `notifyOwner`/`sendEmail` usam `AbortSignal.timeout(5000)`: endpoints lentos não travam o sistema — falha em no máximo 5s com `lastStatus: 0` |
+| Chat em streaming (SSE) | Novo endpoint `/api/chat/ask-stream` (texto/event-stream): autentica por cookie/Bearer, emite `context` (contagem de notas RAG), `chunk` (efeito de digitação, 8 chars/15ms) e `done` ({response, agentName}); grava memória e feed em background. O frontend usa o streaming por padrão e cai automaticamente para o tRPC síncrono se o SSE falhar |
+| Modo offline (PWA) | O service worker agora cacheia a Super Memória (30 min) e o Feed Cognitivo (10 min) além das missões (5 min); consultas GET são servidas do cache com header `x-nexus-offline` quando não há rede, e o app exibe indicador online/offline |
+| Robustez do dev | Em modo de desenvolvimento o SW residual e os caches antigos do PWA são removidos ao carregar a página, eliminando o "Invalid hook call" por duplicidade do React |
 
-### Implementação
+### Configuração
 
-As rotas SSE são registradas **antes** do middleware do Vite para não serem interceptadas pelo fallback SPA. O chunking de resposta (divisão por código de pontos unicode, sem quebrar emojis ou caracteres multibyte) foi isolado em `chunkResponseText()` (`server/_core/index.ts`) e coberto por `server/nexus-chunks.test.ts`. O disparo de webhook segue `triggerMissionWebhooks()` (`server/db.ts`) com timeout de 10s por endpoint; os testes de cobertura estão em `server/nexus-webhooks-f19.test.ts`.
-
-### Testes
-
-Suite completa: 125 testes, 123 passando. Os dois testes que falham ocasionalmente são os de chat (`chat.send` / LLM) que dependem do gateway externo de LLM — quando a cota do provedor está esgotada (HTTP 412 "usage exhausted") eles falham; não são regressões da fase. Os novos testes de webhooks e SSE chunking passam sempre (mockados).
+Nenhuma variável nova. Testes: `server/nexus-webhooks-f19.test.ts` (5/5, incluindo o contrato fail-fast de 5s) e `pnpm test` completo com 120/122 (2 falhas externas por cota 412 do LLM de teste).

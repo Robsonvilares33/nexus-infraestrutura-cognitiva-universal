@@ -96,21 +96,17 @@ if ("serviceWorker" in navigator && window.isSecureContext === true && !import.m
   });
 }
 
-// Rede de segurança em DEV: remove qualquer service worker ativo (registrado
-// antes da versão atual) e limpa os caches antigos. Isso impede que um gráfico
-// de módulos Vite obsoleto (hashes de prebundle antigos) seja mesclado com o
-// novo, o que cria duas identidades de React e causa "Invalid hook call".
-if (import.meta.env.DEV) {
+// Fase 19 (reforço da Fase 17): em desenvolvimento, remover qualquer service
+// worker residual e limpar os caches antigos do PWA — um SW do build anterior
+// (com hashes de prebundle antigos) mistura duas identidades do React na
+// mesma página e causa "Invalid hook call".
+if ("serviceWorker" in navigator && window.isSecureContext === true && import.meta.env.DEV) {
+  navigator.serviceWorker.getRegistrations?.().then(registrations => {
+    registrations.forEach(r => r.unregister());
+  }).catch(() => {});
   try {
-    navigator.serviceWorker?.getRegistrations?.().then((regs) =>
-      Promise.all(regs.map((r) => r.unregister())),
-    );
-    caches?.keys().then((keys) =>
-      Promise.all(keys.map((k) => caches.delete(k))),
-    );
-  } catch {
-    /* não bloquear a inicialização */
-  }
+    caches.keys().then(keys => keys.forEach(k => caches.delete(k))).catch(() => {});
+  } catch { /* ignorar */ }
 }
 
 createRoot(document.getElementById("root")!).render(
