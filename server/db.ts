@@ -1539,6 +1539,53 @@ export async function searchSuperNotes(userId: number, query: string) {
     .limit(50);
 }
 
+// --- Phase 15: semantic embeddings + vector search for Super Memória ---
+import { cosineSimilarity, isEmbeddingAvailable, textRelevance } from "./nexus-embeddings";
+
+async function allUserNotes(userId: number, folder?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const cond = folder
+    ? and(eq(superNotes.userId, userId), eq(superNotes.folder, folder))
+    : eq(superNotes.userId, userId);
+  return db.select().from(superNotes).where(cond).limit(500);
+}
+
+/** Persist a normalized vector for a note (Buffer of float32). */
+export async function saveSuperNoteEmbedding(noteId: number, vector: number[], model: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const bytes = Buffer.alloc(vector.length * 4);
+  for (let i = 0; i < vector.length; i++) bytes.writeFloatLE(vector[i], i * 4);
+  await db.update(superNotes)
+    .set({ embedding: bytes as any, embeddingModel: model, embeddingUpdatedAt: new Date() })
+    .where(eq(superNotes.id, noteId));
+}
+
+/** Semantic search: ranks notes by cosine similarity over stored embeddings,
+ *  falling back to text relevance when no embeddings exist for the user. */
+export async function semanticSearchSuperNotes(userId: number, queryVector: number[], opts: { folder?: string; limit?: number } = {}) {
+  const limit = opts.limit ?? 10;
+  const notes = await allUserNotes(userId, opts.folder);
+  const scored: { note: typeof notes[number]; score: number }[] = [];
+  for (const note of notes) {
+    const row = note as { embedding: Buffer | null };
+    let score = 0;
+    if (row.embedding && row.embedding instanceof Buffer && row.embedding.length >= queryVector.length * 4) {
+      const vec = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, queryVector.length);
+      score = cosineSimilarity(queryVector, Array.from(vec));
+    } else {
+      score = textRelevance("", note) * 0.001; // notes without vectors rank far below matches
+    }
+    scored.push({ note, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
+}
+
+export { isEmbeddingAvailable };
+export { textRelevance as computeTextRelevance };
+
 export async function getLlmSettings(userId: number) {
   const db = await getDb();
   if (!db) return undefined;
