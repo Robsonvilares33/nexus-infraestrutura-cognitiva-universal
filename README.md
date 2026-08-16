@@ -171,3 +171,19 @@ Nova página de conversa contínua (`/chat-multiagente`) em que o usuário escol
 ### Configuração
 
 Nenhuma variável nova é necessária: o chat reutiliza `QWEN_API_KEY` (embeddings) e as preferências de LLM armazenadas em `userLlmSettings`. Testes: `server/nexus-multichat.test.ts` (LLM, banco e embeddings mockados, 7/7 passando).
+
+## Fase 19: Webhooks interativos, modo offline e chat em streaming
+
+Três frentes de amadurecimento operacional: teste manual de webhooks, funcionamento offline de dados recorrentes e respostas ao vivo no chat multiagente.
+
+| Capacidade | Descrição |
+|---|---|
+| Webhook manual (`webhooks.testFire`) | Botão "Testar" no diálogo de webhooks da missão dispara um payload de exemplo (`event: webhook.test`, com `payload.test: true` e metadados da missão) ao endpoint externo; grava `lastStatus`/`lastTriggeredAt` visíveis na UI e retorna `elapsedMs` |
+| Fail-fast 5s | O disparo de webhook e `notifyOwner`/`sendEmail` usam `AbortSignal.timeout(5000)`: endpoints lentos não travam o sistema — falha em no máximo 5s com `lastStatus: 0` |
+| Chat em streaming (SSE) | Novo endpoint `/api/chat/ask-stream` (texto/event-stream): autentica por cookie/Bearer, emite `context` (contagem de notas RAG), `chunk` (efeito de digitação, 8 chars/15ms) e `done` ({response, agentName}); grava memória e feed em background. O frontend usa o streaming por padrão e cai automaticamente para o tRPC síncrono se o SSE falhar |
+| Modo offline (PWA) | O service worker agora cacheia a Super Memória (30 min) e o Feed Cognitivo (10 min) além das missões (5 min); consultas GET são servidas do cache com header `x-nexus-offline` quando não há rede, e o app exibe indicador online/offline |
+| Robustez do dev | Em modo de desenvolvimento o SW residual e os caches antigos do PWA são removidos ao carregar a página, eliminando o "Invalid hook call" por duplicidade do React |
+
+### Configuração
+
+Nenhuma variável nova. Testes: `server/nexus-webhooks-f19.test.ts` (5/5, incluindo o contrato fail-fast de 5s) e `pnpm test` completo com 120/122 (2 falhas externas por cota 412 do LLM de teste).

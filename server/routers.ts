@@ -23,7 +23,7 @@ import {
   listAllUsers, updateUserRole, setMarketplacePluginApproved, listAllMarketplacePlugins, deleteAnyMarketplacePlugin, getPlatformStats,
   getUserProfile, upsertUserProfile, getUserMissionsHistory, getUserInstalledPlugins,
   getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
-  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks,
+  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks, testFireMissionWebhook,
   addInAppNotification, markNotificationRead, markAllNotificationsRead, listUserNotifications, countUnreadNotifications,
   sendEmail, evaluateAchievements, listUserAchievements, markAchievementsSeen,
   searchMarketplacePluginsByTerms,
@@ -1103,6 +1103,13 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
       .mutation(async ({ ctx, input }) => {
         await removeMissionWebhook(input.webhookId, ctx.user.id);
         return { success: true };
+      }),
+    // Fase 19 — teste manual de um webhook (payload de exemplo, timeout fail-fast de 5s)
+    testFire: protectedProcedure
+      .input(z.object({ missionId: z.number(), webhookId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await testFireMissionWebhook(input.missionId, input.webhookId, ctx.user.id);
+        return result;
       }),
   }),
 

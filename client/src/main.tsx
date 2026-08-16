@@ -96,6 +96,19 @@ if ("serviceWorker" in navigator && window.isSecureContext === true && !import.m
   });
 }
 
+// Fase 19 (reforço da Fase 17): em desenvolvimento, remover qualquer service
+// worker residual e limpar os caches antigos do PWA — um SW do build anterior
+// (com hashes de prebundle antigos) mistura duas identidades do React na
+// mesma página e causa "Invalid hook call".
+if ("serviceWorker" in navigator && window.isSecureContext === true && import.meta.env.DEV) {
+  navigator.serviceWorker.getRegistrations?.().then(registrations => {
+    registrations.forEach(r => r.unregister());
+  }).catch(() => {});
+  try {
+    caches.keys().then(keys => keys.forEach(k => caches.delete(k))).catch(() => {});
+  } catch { /* ignorar */ }
+}
+
 createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
