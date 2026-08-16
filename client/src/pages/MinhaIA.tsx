@@ -289,14 +289,27 @@ export default function MinhaIA() {
   };
 
   // Compartilhamento de missões (exportar/importar)
-  const handleExport = async (missionId: number) => {
-    try {
-      const { code, title } = await trpc.missions.exportMission.useQuery({ missionId }, { enabled: false }).refetch().then(r => r.data as { code: string; title: string });
-      try { await navigator.clipboard.writeText(code); toast.success(`Missão "${title}" copiada — compartilhe o código com outro usuário.`); } catch { toast.success("Código da missão gerado (copie abaixo):"); }
-    } catch (error) {
-      toast.error("Erro ao exportar missão: " + String(error));
-    }
+  const [exportMissionId, setExportMissionId] = useState<number>(0);
+  const exportQuery = trpc.missions.exportMission.useQuery(
+    { missionId: exportMissionId },
+    { enabled: exportMissionId > 0, retry: false },
+  );
+
+  const handleExport = (missionId: number) => {
+    setExportMissionId(missionId);
   };
+
+  // Resultado do código exportado chega via a query habilitada pelo handler acima
+  useEffect(() => {
+    if (exportMissionId > 0 && exportQuery.data) {
+      const { code, title } = exportQuery.data;
+      navigator.clipboard.writeText(code).catch(() => {
+        toast.info("Código da missão (copie abaixo):\n" + code);
+      });
+      toast.success(`Missão "${title}" exportada — o código foi copiado para compartilhar com outro usuário.`);
+      setExportMissionId(0);
+    }
+  }, [exportMissionId, exportQuery.data]);
 
   const [importCode, setImportCode] = useState("");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
