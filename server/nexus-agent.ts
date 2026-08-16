@@ -20,6 +20,8 @@ import {
   trackRead,
 } from "./nexus-computer-tools";
 import { invokeLLMWithProvider, type ProviderConfig } from "./nexus-multillm";
+import { generateEmbedding } from "./nexus-embeddings";
+import { searchSuperNotes, semanticSearchSuperNotes, saveSuperNoteEmbedding } from "./db";
 
 const AGENTS = ["Sincronia", "Pesquisa", "Memória", "Código", "Planejamento", "Crítica", "Síntese", "Execução", "Comunicação"] as const;
 
@@ -37,6 +39,22 @@ const MEMORY_TOOLS: Tool[] = [
           query_hint: { type: "string", description: "Short hint of what to look for in memory (used to pick tier)." },
         },
         required: ["query_hint"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "memory_search",
+      description: "Semantic search in the user's Super Memória vault (Obsidian-style notes). Returns the most relevant notes for the query, ranked by relevance. Use this to consult the user's permanent knowledge BEFORE or DURING the mission.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural-language description of what you are looking for." },
+          folder: { type: "string", description: "Optional folder to restrict the search." },
+        },
+        required: ["query"],
         additionalProperties: false,
       },
     },
@@ -172,6 +190,23 @@ const MEMORY_TOOLS: Tool[] = [
   {
     type: "function",
     function: {
+      name: "symbiosis_post",
+      description: "Send a message to the SIAOL-PRO Symbiosis neural bridge (channel 'symbiosis') so the other AIs in the network (Antigravity, MiniMax, Manus) see it.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "The message content (max 1000 chars)." },
+          priority: { type: "string", enum: ["low", "normal", "high"], description: "Message priority."
+            },
+        },
+        required: ["content"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finish",
       description: "Synthesize all accumulated observations into the final mission result and end the loop.",
       parameters: {
@@ -254,18 +289,36 @@ export async function runAgentLoop(
 
   // Seed recent memory into the context (persistent mission context, Manus-style)
   const recentMemories = await getMemoryByTier(userId, "ativa");
+
+  // Phase 15 RAG: pull relevant Super Memória notes BEFORE the loop so the agent
+  // starts already informed by the user's permanent knowledge, and can dig deeper
+  // via the memory_search tool later.
+  let ragNotesText = "";
+  try {
+    const embed = await generateEmbedding(interp.interpretedGoal.slice(0, 500));
+    let hits: { note: any; score: number }[] = [];
+    if ("vector" in embed) {
+      hits = await semanticSearchSuperNotes(userId, embed.vector, { limit: 4 });
+    } else {
+      const all = await searchSuperNotes(userId, interp.interpretedGoal.slice(0, 200));
+      hits = all.slice(0, 4).map(n => ({ note: n, score: 0 }));
+    }
+    ragNotesText = hits.map(h => `- [${Math.round(h.score * 100)}%] ${h.note.title}: ${h.note.content.slice(0, 250)}`).join("\n") || "(sem notas relevantes na Super Memória)";
+    if (hits.length) await persist(userId, missionId, "rag", undefined, "Orquestrador", `${hits.length} nota(s) relevante(s) recuperada(s) da Super Memória`);
+  } catch { /* never fail the mission because RAG is unavailable */ }
+
   type CtxMsg = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_call_id?: string; tool_calls?: unknown };
   const contextWindow: CtxMsg[] = [
     {
       role: "system",
       content:
-        `You are the NEXUS autonomous agent (fusion mode). You execute missions by choosing tools each iteration. Available tools: search_memory, save_memory, ask_agent${computerEnabled ? ", run_shell, read_file, write_file, edit_file, list_dir" : ""}${webEnabled ? ", web_fetch" : ""}, finish. Choose ONE tool per response. The mission ends only with finish. If a previous tool call failed, acknowledge the error and adapt. Keep details concise. For computer tools use simple relative paths inside the workspace (e.g. 'dados.txt').`,
+        `You are the NEXUS autonomous agent (fusion mode). You execute missions by choosing tools each iteration. Available tools: search_memory, memory_search, save_memory, ask_agent${computerEnabled ? ", run_shell, read_file, write_file, edit_file, list_dir" : ""}${webEnabled ? ", web_fetch" : ""}, symbiosis_post, finish. Choose ONE tool per response. The mission ends only with finish. If a previous tool call failed, acknowledge the error and adapt. Keep details concise. For computer tools use simple relative paths inside the workspace (e.g. 'dados.txt').`,
     },
     {
       role: "user",
       content: `Mission: ${missionInput}\n\nInterpreted goal: ${interp.interpretedGoal}\n\nRelevant context from your long-term memory:\n${
         recentMemories.slice(0, 8).map((m: any) => `- ${m.content}`).join("\n") || "(nenhuma memória ativa)"
-      }`,
+      }\n\nRelevant notes already retrieved from your Super Memória vault (RAG):\n${ragNotesText || "(sem notas relevantes)"}\n\nTip: use memory_search if you need more detail from the vault during the mission.`,
     },
   ];
 
@@ -339,6 +392,53 @@ export async function runAgentLoop(
         contextWindow.push({ role: "assistant", content: "" });
         (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
         contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "memory_search") {
+        // RAG: semantic search over the Super Memória vault
+        const query = String(args.query ?? "").slice(0, 500);
+        const embed = await generateEmbedding(query);
+        let hits: { note: any; score: number }[] = [];
+        if ("vector" in embed) {
+          hits = await semanticSearchSuperNotes(userId, embed.vector, { folder: args.folder as string | undefined, limit: 5 });
+        } else {
+          const all = await searchSuperNotes(userId, query);
+          hits = all.slice(0, 5).map(n => ({ note: n, score: 0 }));
+        }
+        toolResultText = hits.length
+          ? hits.map(h => `[${Math.round(h.score * 100)}%] ${h.note.title} (${h.note.folder}): ${h.note.content.slice(0, 400)}`).join("\n---\n")
+          : "Nenhuma nota da Super Memória corresponde à busca.";
+        await persist(userId, missionId, "tool_result", "memory_search", undefined, toolResultText.slice(0, 600));
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText.slice(0, 2000), tool_call_id: call.id } as CtxMsg);
+      } else if (call.function.name === "symbiosis_post") {
+        // Send a message to the SIAOL-PRO Symbiosis neural bridge
+        const content = String(args.content ?? "").slice(0, 1000);
+        const priority = args.priority === "low" ? "low" : args.priority === "high" ? "high" : "normal";
+        // Ponte Neural SIAOL: endpoint/token configuráveis via env (defaults da rede atual)
+        const bridgeUrl = (process.env.SIAOL_BRIDGE_URL ?? "https://urijah-metaphrastical-gorily.ngrok-free.dev/message").replace(/\/$/, "");
+        const bridgeToken = process.env.SIAOL_BRIDGE_TOKEN ?? "spark-antigravity-symbiosis-2026";
+        if (!bridgeToken) {
+          toolResultText = "Ponte Neural SIAOL desativada (sem token configurado).";
+        } else {
+        const bridgeRes = await fetch(bridgeUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${bridgeToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ sender: "Manus-01", channel: "symbiosis", content, priority }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!bridgeRes.ok) {
+          toolResultText = `Ponte Neural SIAOL indisponível (HTTP ${bridgeRes.status}) — mensagem não entregue. Continue a missão.`;
+        } else {
+          toolResultText = `Mensagem enviada à Ponte Neural SIAOL (canal symbiosis) com sucesso. ID: ${(await bridgeRes.json().catch(() => ({}))).message?.id ?? "?"}`;
+        }
+        }
+        await persist(userId, missionId, "tool_result", "symbiosis_post", undefined, toolResultText.slice(0, 400));
+        contextWindow.push({ role: "assistant", content: "" });
+        (contextWindow[contextWindow.length - 1] as any).tool_calls = toolCalls;
+        contextWindow.push({ role: "tool", content: toolResultText.slice(0, 1000), tool_call_id: call.id } as CtxMsg);
       } else if (call.function.name === "save_memory") {
         const tags = Array.isArray(args.tags) ? args.tags.map(String).slice(0, 6) : ["agent", "fusion"];
         await addMemory(userId, { content: String(args.content ?? "").slice(0, 2000), origin: "agent_loop", tags });

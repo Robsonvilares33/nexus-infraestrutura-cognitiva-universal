@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -42,6 +43,7 @@ function GridPreview({ content, onOpen }: { content: string | null; onOpen: (tit
 }
 
 type Note = {
+  semanticScore?: number;
   id: number;
   title: string;
   content: string;
@@ -59,6 +61,13 @@ export default function SuperMemoria() {
   const utils = trpc.useUtils();
   const [query, setQuery] = useState("");
   const [selectedFolder, setSelectedFolder] = useState<string>("Todas");
+  // Fase 15: busca semântica por embeddings (top-N com score de relevância)
+  const [semantic, setSemantic] = useState(false);
+  const { data: availability } = trpc.superNotes.availability.useQuery();
+  const semanticResult = trpc.superNotes.semanticSearch.useQuery(
+    { query, folder: selectedFolder === "Todas" ? undefined : selectedFolder, limit: 20 },
+    { enabled: query.trim().length > 1 && semantic }
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Note | null>(null);
   const [title, setTitle] = useState("");
@@ -88,6 +97,7 @@ export default function SuperMemoria() {
     utils.superNotes.list.invalidate();
     utils.superNotes.folders.invalidate();
     if (query.trim().length > 1) utils.superNotes.search.invalidate();
+    if (query.trim().length > 1 && semantic) utils.superNotes.semanticSearch.invalidate();
   };
 
   const createMutation = trpc.superNotes.create.useMutation({
@@ -134,8 +144,9 @@ export default function SuperMemoria() {
     }
   }
 
-  const displayed = query.trim().length > 1 ? (searchResult.data ?? []) : (notes ?? []);
-  const pending = isLoading || (query.trim().length > 1 && searchResult.isLoading);
+  const displayed = query.trim().length > 1 ? (semantic ? (semanticResult.data?.results ?? []) : (searchResult.data ?? [])) : (notes ?? []);
+  const pending = isLoading || (query.trim().length > 1 && (semantic ? semanticResult.isLoading : searchResult.isLoading));
+  const semanticModeNote = semanticResult.data?.note;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -179,6 +190,11 @@ export default function SuperMemoria() {
           <div className="relative flex-1 min-w-56">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input className="pl-9" placeholder="Buscar na memória..." value={query} onChange={(e) => setQuery(e.target.value)} />
+            {semanticModeNote && <p className="mt-1 text-xs text-amber-400/80">{semanticModeNote}</p>}
+          </div>
+          <div className="flex items-center gap-2 whitespace-nowrap" title="Busca semântica por embeddings (QwenCloud text-embedding-v3) — usa score de relevância em vez de texto exato">
+            <Switch checked={semantic} onCheckedChange={setSemantic} />
+            <span className="text-sm text-muted-foreground">Semântica</span>
           </div>
           <Select value={selectedFolder} onValueChange={(v) => { setSelectedFolder(v); setQuery(""); setSelectedNote(null); }}>
             <SelectTrigger className="w-44 md:hidden">
@@ -244,6 +260,11 @@ export default function SuperMemoria() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold truncate">{note.title}</h3>
+                    {semantic && typeof note.semanticScore === "number" && (
+                      <Badge variant="outline" className="text-xs border-emerald-400/50 text-emerald-300">
+                        {Math.round(note.semanticScore * 100)}% relevância
+                      </Badge>
+                    )}
                     <Badge variant={note.source === "agent" ? "default" : "secondary"} className="text-xs">
                       {note.source === "agent" ? "Agente" : "Usuário"}
                     </Badge>

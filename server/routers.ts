@@ -40,8 +40,10 @@ import {
   getWeeklyGrowthStats, getUserById,
   seedMissionTemplates,
   addSuperNote, listSuperNotes, getSuperNote, updateSuperNote, deleteSuperNote, searchSuperNotes,
+  saveSuperNoteEmbedding, semanticSearchSuperNotes, computeTextRelevance,
   getLlmSettings, upsertLlmSettings,
 } from "./db";
+import { generateEmbedding, isEmbeddingAvailable, EMBEDDING_MODEL } from "./nexus-embeddings";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
 import { sql, eq, and, inArray } from "drizzle-orm";
@@ -1211,6 +1213,13 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
           links: input.links?.length ? JSON.stringify(input.links) : undefined,
           source: "user",
         });
+        // Fire-and-forget: index the new note's embedding so semantic search works immediately
+        void (async () => {
+          try {
+            const embed = await generateEmbedding(`${input.title} ${input.content}`.slice(0, 4000));
+            if ("vector" in embed) await saveSuperNoteEmbedding(id, embed.vector, embed.model);
+          } catch { /* never block the mutation */ }
+        })();
         return { success: true, id };
       }),
     update: protectedProcedure
@@ -1231,6 +1240,16 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         if (rest.tags) patch.tags = JSON.stringify(rest.tags);
         if (rest.links) patch.links = JSON.stringify(rest.links);
         await updateSuperNote(ctx.user.id, id, patch);
+        // Fire-and-forget: re-index the updated note's embedding
+        void (async () => {
+          try {
+            const updated = await getSuperNote(ctx.user.id, id);
+            if (updated) {
+              const embed = await generateEmbedding(`${updated.title} ${updated.content}`.slice(0, 4000));
+              if ("vector" in embed) await saveSuperNoteEmbedding(id, embed.vector, embed.model);
+            }
+          } catch { /* never block the mutation */ }
+        })();
         return { success: true };
       }),
     remove: protectedProcedure
@@ -1239,6 +1258,45 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
     search: protectedProcedure
       .input(z.object({ query: z.string().min(1).max(200) }))
       .query(async ({ ctx, input }) => searchSuperNotes(ctx.user.id, input.query)),
+    // Phase 15: semantic search — embeddings (QwenCloud text-embedding-v3) with text fallback
+    semanticSearch: protectedProcedure
+      .input(z.object({ query: z.string().min(1).max(500), folder: z.string().optional(), limit: z.number().min(1).max(50).optional() }))
+      .query(async ({ ctx, input }) => {
+        const embed = await generateEmbedding(input.query);
+        let results: Awaited<ReturnType<typeof semanticSearchSuperNotes>>;
+        let mode: "embedding" | "text" = "text";
+        if ("vector" in embed) {
+          results = await semanticSearchSuperNotes(ctx.user.id, embed.vector, { folder: input.folder, limit: input.limit ?? 10 });
+          mode = "embedding";
+        } else {
+          // fallback: rank all notes by text relevance to the query
+          const all = await listSuperNotes(ctx.user.id, input.folder ? { folder: input.folder } : {});
+          results = all
+            .map(note => ({ note, score: computeTextRelevance(input.query, note) }))
+            .filter(r => r.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, input.limit ?? 10);
+        }
+        return {
+          results: results.map(r => ({ ...r.note, semanticScore: Math.round(r.score * 1000) / 1000 })),
+          mode,
+          embeddingModel: mode === "embedding" ? EMBEDDING_MODEL : null,
+          note: mode === "text" ? "Embeddings indisponíveis (QWEN_API_KEY não configurada) — busca textual usada" : undefined,
+        };
+      }),
+    // Re-index one note's embedding (call after create/update; the agent does it automatically)
+    reindexEmbedding: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const note = await getSuperNote(ctx.user.id, input.id);
+        if (!note) return { success: false, note: "Nota não encontrada" };
+        const embed = await generateEmbedding(`${note.title} ${note.content}`.slice(0, 4000));
+        if (!("vector" in embed)) return { success: false, note: embed.reason };
+        await saveSuperNoteEmbedding(note.id, embed.vector, embed.model);
+        return { success: true, model: embed.model };
+      }),
+    availability: protectedProcedure.query(async () => ({ embeddings: isEmbeddingAvailable() })),
+
     folders: protectedProcedure
       .query(async ({ ctx }) => {
         const notes = await listSuperNotes(ctx.user.id);

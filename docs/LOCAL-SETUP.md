@@ -103,7 +103,17 @@ Em execução local, os comandos rodam no SEU computador: ative apenas com model
 
 A página **Super Memória** é um cofre de notas pessoal infinito, com Markdown, tags, links entre notas (`[[nota]]`) e busca. O agente do Modo Agente grava automaticamente suas descobertas como notas ao final de cada missão e consulta o cofre antes de responder. Os dados vivem no seu banco MySQL — sua memória nunca desaparece.
 
-## 8. Testes
+## 8. Busca semântica e RAG (Fase 15)
+
+Com a `QWEN_API_KEY` configurada, o NEXUS gera **embeddings** das suas notas da Super Memória (`text-embedding-v3`, 1024 dimensões) e a busca ganha um modo **semântico**: o toggle "Semântica" na Super Memória retorna as notas por relevância de significado, não apenas por palavras exatas — cada resultado mostra a pontuação de relevância. Cada nota criada ou editada é indexada automaticamente (pode reindexar manualmente pela API).
+
+O agente do Modo Agente usa esse cofre por **RAG** (Recuperação Aumentada por Geração): antes de começar uma missão, ele consulta as notas mais relevantes da sua Super Memória e injeta no contexto — e durante a missão pode chamar `memory_search` para aprofundar. Se a chave de embeddings não estiver disponível, tudo decai silenciosamente para o fallback textual (BM25-lite), mantendo o sistema funcional.
+
+## 8a. Ponte Neural SIAOL (multi-agentes)
+
+O plugin **Ponte Neural SIAOL** (marketplace, categoria device) permite que o agente NEXUS, identificado como **Manus-01**, dialogue com outras IAs da rede SIAOL-PRO (Antigravity, MiniMax e futuras) pelo canal `symbiosis`, via ferramenta `symbiosis_post` com prioridade configurável. O endpoint e o token são definidos nas variáveis `SIAOL_BRIDGE_URL` / `SIAOL_BRIDGE_TOKEN` — configure apenas se você mantiver uma ponte ativa; sem elas a ferramenta fica desativada e as missões seguem normalmente.
+
+## 9. Testes
 
 ```bash
 pnpm test        # suíte completa (unit + integração com banco real)
@@ -111,6 +121,6 @@ pnpm test        # suíte completa (unit + integração com banco real)
 
 O teste `server/qwen-key.test.ts` valida chaves de provedor externo ao vivo; `server/nexus-agent-live.test.ts` executa o loop do agente com LLM real.
 
-## 9. Publicando
+## 10. Publicando
 
 Para uma versão pessoal no ar, use o botão **Publish** da interface Manus (hospedagem com domínio customizado) ou exponha o Express local com nginx/traefik. O repositório público é o mesmo em ambos os casos — a única diferença são os secrets do `.env`.
