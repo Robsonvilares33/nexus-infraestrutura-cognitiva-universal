@@ -134,3 +134,8 @@ A Super Memória agora gera embeddings vetoriais automaticamente para cada nota 
 | Ferramenta `symbiosis_post` | O agente envia mensagens como nó `Manus-01` na Ponte Neural SIAOL |
 
 Para ativar embeddings, adicione `QWEN_API_KEY` (ver `docs/ENV-TEMPLATE.md`). A ponte neural é opcional: defina `SIAOL_BRIDGE_URL` e `SIAOL_BRIDGE_TOKEN`; sem eles a ferramenta fica desativada e o sistema funciona normalmente. Detalhes completos em `docs/LOCAL-SETUP.md`.
+
+## Fase 16: Compartilhamento de Missões
+
+Usuários podem compartilhar missões entre si por meio de um código portátil. A página "Exportar" gera um código base64url contendo o input, o título e o resultado da missão (payload versionado `app=nexus, v1`); qualquer outro usuário cola o código no botão **Importar** da página Minha IA para adicionar a missão à sua própria lista.
+

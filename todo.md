@@ -218,3 +218,8 @@
 - [x] LOCAL-SETUP/ENV-TEMPLATE atualizados (QWEN_API_KEY opcional para embeddings, SIAOL_BRIDGE_URL/_TOKEN)
 - [x] Sync GitHub (PR #3 mergeado em c3e85bd) + checkpoint b9864088 publicado
 - [x] Handshake com a Ponte Neural SIAOL testado ao vivo (GET + POST com Bearer)
+
+## Fase 16: Compartilhamento de Missões (exportar/importar)
+- [x] Backend: endpoints missions.exportMission (código base64url com input/título/resultado/confiança, payload versionado app=nexus v1) e missions.importMission (validação + cria missão do usuário, limite 5000 chars)
+- [x] Frontend: botão Exportar nos cartões de missão da Minha IA (copia código p/ área de transferência) + botão Importar na barra de criação (dialog com textarea)
+- [x] Vitest coverage (export + import com validação de payload) — 110 testes, 108 passando (2 por cota externa 412) + checkpoint + GitHub sync
