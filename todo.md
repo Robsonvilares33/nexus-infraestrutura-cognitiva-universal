@@ -248,4 +248,4 @@
 - [x] Frontend: Minha IA — botão Testar webhook + exibição de último disparo (HTTP + timestamp)
 - [x] Vitest coverage (nexus-webhooks-f19.test.ts, 5/5 incluindo fail-fast 5s) — 120/122 passando (2 cota externa 412)
 - [x] README.md com seção Fase 19
-- [ ] Sync GitHub (branch sync-fase19b + PR #8)
+- [x] Sync GitHub (branch sync-fase19b + PR #8 aberto em https://github.com/Robsonvilares33/nexus-infraestrutura-cognitiva-universal/pull/8; produção verificada 200, SSE endpoint exige autenticação 401 conforme esperado)
