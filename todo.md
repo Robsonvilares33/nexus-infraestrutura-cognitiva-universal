@@ -261,4 +261,4 @@
 - [x] Frontend: alerta de cota LLM (banner/toast 412 com orientação: trocar provedor em Config ou configurar chave própria)
 - [x] Vitest coverage da Fase 20 (registro de eventos + detecção 412)
 - [x] README.md e todo.md com seção Fase 20
-- [ ] Sync GitHub (branch sync-fase20b + PR #9)
+- [x] Sync GitHub (branch sync-fase20b + PR #9 aberto em https://github.com/Robsonvilares33/nexus-infraestrutura-cognitiva-universal/pull/9; PR #8 da Fase 19 mesclado em e67d1a9)
