@@ -207,13 +207,14 @@
 - [x] Relatório final de uso e possibilidades entregue
 
 ## Fase 15: RAG, Embeddings e Ponte Neural SIAOL
-- [ ] Embeddings: coluna embedding (BLOB 4KB) + embeddingUpdated na superNotes; gerar via QwenCloud text-embedding-v3 (dim 1024) com LRU cache
-- [ ] Backend: server/nexus-embeddings.ts (geração) + db.ts semanticSearchSuperNotes (cosseno em memória, fallback textual)
-- [ ] Router: superNotes.semanticSearch({query, folder}) com scores
-- [ ] RAG no agente: tool memory_search + injeção das notas relevantes no contexto inicial da missão
-- [ ] UI SuperMemoria: busca semântica (toggle na barra de busca, scores)
-- [ ] Plugin Ponte Neural SIAOL: seed no marketplace_plugins (canal symbiosis + metadados do webhook)
-- [ ] Tool do agente symbiosis_post (canal symbiosis)
-- [ ] Vitest (embeddings unit, semantic mock, RAG tool)
-- [ ] LOCAL-SETUP/README atualizados (QWEN_API_KEY opcional para embeddings)
-- [ ] Sync GitHub + checkpoint
+- [x] Embeddings: coluna embedding (BLOB 4KB) + embeddingUpdatedAt na superNotes; gerados via QwenCloud text-embedding-v3 (dim 1024) com LRU cache
+- [x] Backend: server/nexus-embeddings.ts (geração, cosseno, fallback textual BM25) + db.ts semanticSearchSuperNotes (cosseno em memória)
+- [x] Router: superNotes.semanticSearch({query, folder}) com scores + reindexEmbedding + availability
+- [x] RAG no agente: tool memory_search + injeção das notas relevantes no contexto inicial da missão
+- [x] UI SuperMemoria: busca semântica (toggle na barra de busca, badges de pontuação)
+- [x] Plugin Ponte Neural SIAOL: seed no marketplace_plugins (canal symbiosis + metadados)
+- [x] Tool do agente symbiosis_post (canal symbiosis, Manus-01)
+- [x] Vitest (embeddings unit, semantic mock, RAG tool) — 23 novos testes, 100 total
+- [x] LOCAL-SETUP/ENV-TEMPLATE atualizados (QWEN_API_KEY opcional para embeddings, SIAOL_BRIDGE_URL/_TOKEN)
+- [x] Sync GitHub (PR #3 mergeado em c3e85bd) + checkpoint b9864088 publicado
+- [x] Handshake com a Ponte Neural SIAOL testado ao vivo (GET + POST com Bearer)
