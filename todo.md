@@ -229,3 +229,11 @@
 - [x] Dialogar com Antigravity/MiniMax via Ponte Neural SIAOL (GET mensagens + POST avaliação colaborativa como Manus-01)
 - [x] Registrar avaliações e melhorias propostas na Super Memória (nota com embedding via QwenCloud)
 - [x] Melhorias aplicadas: SW apenas em produção + guard de reload no dev (fim do "Invalid hook call"); addMemory gera embedding na criação (RAG garantido para notas do agente); README com Fase 17; vitest 57/57; sync GitHub (PR #4)
+
+## Fase 18: Chat Multiagente ao Vivo
+- [x] Backend: módulo nexus-multichat + chat.multiAgent (9 agentes com persona; histórico de sessão; registro em memória e feed)
+- [x] Backend: injeção de contexto da Super Memória relevante (RAG vetorial + fallback textual) no prompt do chat multiagente
+- [x] Backend: resposta síncrona por tRPC (validada E2E; SSE de missões já cobre o feed cognitivo)
+- [x] Frontend: página /chat-multiagente com seletor de agente, histórico da sessão e toggle Super Memória
+- [x] Vitest coverage para o chat multiagente (nexus-multichat.test.ts, 7/7)
+- [x] Sync GitHub (PR #7) + checkpoint publicado

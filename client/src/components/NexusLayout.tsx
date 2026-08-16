@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { path: "/docs", label: "Docs", icon: FileText },
   { path: "/analytics", label: "Analytics", icon: BarChart3 },
   { path: "/chat", label: "Chat", icon: MessageSquare },
+  { path: "/chat-multiagente", label: "Chat Multiagente", icon: Bot },
   { path: "/marketplace", label: "Marketplace", icon: Package },
   { path: "/profile", label: "Perfil", icon: UserCircle2 },
   { path: "/notificacoes", label: "Notificações", icon: Bell },

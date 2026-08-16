@@ -44,6 +44,7 @@ import {
   getLlmSettings, upsertLlmSettings,
 } from "./db";
 import { generateEmbedding, isEmbeddingAvailable, EMBEDDING_MODEL } from "./nexus-embeddings";
+import { multiAgentChat, buildAgentSystemPrompt, AGENT_PERSONAS } from "./nexus-multichat";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { z } from "zod";
 import { sql, eq, and, inArray } from "drizzle-orm";
@@ -589,10 +590,33 @@ export const appRouter = router({
           evaluateAchievements(userId).catch(() => {});
         }
 
-        return { response: responseText };
+                return { response: responseText };
       }),
+    /** Fase 18 — Chat multiagente ao vivo: agente especializado + RAG da Super Memória */
+    multiAgent: protectedProcedure
+      .input(z.object({
+        message: z.string().min(1).max(4000),
+        agent: z.string().optional(),
+        history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(20).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+        try {
+          return await multiAgentChat(userId, {
+            message: input.message,
+            agent: input.agent,
+            history: input.history,
+          });
+        } catch (error) {
+          return { response: `Erro temporário ao consultar o agente: ${friendlyMissionError(String(error))}`, ragNotes: 0, agentName: input.agent && input.agent !== "all" ? input.agent : "NEXUS" };
+        }
+      }),
+    /** Fase 18 — lista de agentes especializados disponíveis no chat multiagente */
+    multiAgentAgents: protectedProcedure.query(async () => {
+      const personas = Object.entries(AGENT_PERSONAS).map(([name, p]) => ({ name, ...p }));
+      return personas;
+    }),
   }),
-
   analytics: router({
     get: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();

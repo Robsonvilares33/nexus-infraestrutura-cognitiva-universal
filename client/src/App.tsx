@@ -18,6 +18,7 @@ import Status from "./pages/Status";
 import Docs from "./pages/Docs";
 import Analytics from "./pages/Analytics";
 import Chat from "./pages/Chat";
+import ChatMultiagente from "./pages/ChatMultiagente";
 import Marketplace from "./pages/Marketplace";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
@@ -44,6 +45,7 @@ function Router() {
         <Route path="/docs" component={Docs} />
         <Route path="/analytics" component={Analytics} />
         <Route path="/chat" component={Chat} />
+        <Route path="/chat-multiagente" component={ChatMultiagente} />
         <Route path="/marketplace" component={Marketplace} />
         <Route path="/admin" component={Admin} />
         <Route path="/profile" component={Profile} />
