@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, float, boolean, datetime } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, float, boolean, datetime, customType } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -329,6 +329,12 @@ export const superNotes = mysqlTable("superNotes", {
   links: varchar("links", { length: 512 }), // JSON: [[wiki-links]] to other notes
   source: mysqlEnum("source", ["user", "agent"]).default("user").notNull(),
   missionId: int("missionId"),
+  // Phase 15: semantic embedding (1024 dims × 4 bytes = 4KB) for vector search + RAG
+  embedding: customType<{ data: Buffer | null }>({
+    dataType: () => "MEDIUMBLOB",
+  })("embedding"),
+  embeddingModel: varchar("embeddingModel", { length: 64 }),
+  embeddingUpdatedAt: timestamp("embeddingUpdatedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

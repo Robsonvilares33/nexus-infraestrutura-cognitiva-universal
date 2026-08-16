@@ -42,6 +42,24 @@ QWEN_API_KEY="sk-ws-..."
 OLLAMA_BASE_URL="http://localhost:11434/api"
 ```
 
+## Fase 15 — Embeddings (Super Memória semântica / RAG)
+
+A `QWEN_API_KEY` ativa também os embeddings (`text-embedding-v3`, 1024 dimensões, dashscope-intl). Sem ela, a busca semântica da Super Memória e o RAG do agente caem automaticamente para o fallback textual (BM25-lite) — nada quebra, só perde precisão.
+
+```env
+QWEN_API_KEY="sk-ws-..."               # também ativa embeddings se presente
+QWEN_EMBEDDING_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+```
+
+## Fase 15 — Ponte Neural SIAOL (multi-agentes)
+
+Canal de comunicação entre o agente NEXUS (Manus-01) e outras IAs da rede SIAOL-PRO. Se o token ficar vazio, a ferramenta `symbiosis_post` fica desativada e o agente segue as missões normalmente.
+
+```env
+SIAOL_BRIDGE_URL="https://seudominio.ngrok-free.dev/message"
+SIAOL_BRIDGE_TOKEN="bearer-token-da-sua-ponte"
+```
+
 ## E-mail (opcional — notificações)
 
 ```
