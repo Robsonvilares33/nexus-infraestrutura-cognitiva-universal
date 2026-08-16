@@ -720,41 +720,12 @@ export default function MinhaIA() {
                       ) : (
                         <div className="space-y-1.5 max-h-40 overflow-auto">
                           {webhooks.map(h => (
-                            <div key={h.id} className="flex items-center gap-2 bg-[rgba(3,5,14,0.8)] border border-[rgba(150,175,220,0.08)] p-2">
-                              <Webhook className="h-3 w-3 text-[#3fe7b0] shrink-0" />
-                              <p className="text-[9px] font-mono text-[#aab4d6] truncate flex-1" title={h.url}>{h.url}</p>
-                              {h.lastStatus !== null && h.lastStatus !== undefined && (
-                                <span className={`text-[8px] font-mono px-1.5 py-0.5 border shrink-0 ${h.lastStatus >= 200 && h.lastStatus < 300 ? "text-[#3fe7b0] border-[rgba(63,231,176,0.25)]" : "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]"}`}>
-                                  HTTP {h.lastStatus}
-                                </span>
-                              )}
-                              {h.lastTriggeredAt !== null && h.lastTriggeredAt !== undefined && (
-                                <span className="text-[8px] font-mono text-[#7684a0] whitespace-nowrap shrink-0" title={String(h.lastTriggeredAt)}>
-                                  {new Date(h.lastTriggeredAt as Date | string).toLocaleString("pt-BR")}
-                                </span>
-                              )}
-                              <button
-                                onClick={() => {
-                                  if (!hookMissionId) return;
-                                  testFireMutation.mutate({ missionId: hookMissionId, webhookId: h.id });
-                                }}
-                                disabled={testFireMutation.isPending}
-                                className="text-[#7cf3ff] hover:text-[#7cf3ff]/80 transition-colors shrink-0 disabled:opacity-40"
-                                title="Fase 19 — testar webhook manualmente (payload de exemplo)"
-                              >
-                                <Terminal className="h-3 w-3" />
-                              </button>
-                              <button
-                                onClick={() => removeWebhookMutation.mutate({ webhookId: h.id })}
-                                className="text-[#ff7a8c] hover:text-[#ff7a8c]/80 transition-colors shrink-0"
-                                aria-label="Remover webhook"
-                              >
-                                <Trash className="h-3 w-3" />
-                              </button>
-                            </div>
+                            <WebhookEventList key={h.id} webhookId={h.id} missionId={m.id} url={h.url} onTest={() => testFireMutation.mutate({ missionId: m.id, webhookId: h.id })} onRemove={() => removeWebhookMutation.mutate({ webhookId: h.id })} />
                           ))}
                         </div>
                       )}
+                      {webhooks?.length ? null : null}
+                      <div className="hidden" />
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -768,3 +739,74 @@ export default function MinhaIA() {
     </div>
   );
 }
+
+// Fase 20 — item de webhook com botão Testar/Remover e painel de monitoramento (últimos disparos)
+const RESULT_STYLES: Record<string, string> = {
+  sucesso: "text-[#3fe7b0] border-[rgba(63,231,176,0.25)]",
+  falha: "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]",
+  timeout: "text-[#ffb454] border-[rgba(255,180,84,0.25)]",
+  teste: "text-[#aeb6d6] border-[rgba(174,182,214,0.25)]",
+};
+
+function WebhookEventList({ webhookId, missionId, url, onTest, onRemove }: {
+  webhookId: number;
+  missionId: number;
+  url: string;
+  onTest: () => void;
+  onRemove: () => void;
+}) {
+  // Fase 20 — histórico de disparos (painel de monitoramento)
+  const { data: events, refetch: refetchEvents } = trpc.webhooks.listEvents.useQuery(
+    { missionId, webhookId, limit: 30 },
+    { enabled: true },
+  );
+  const lastEvent = events?.[0];
+  return (
+    <div className="bg-[rgba(3,5,14,0.8)] border border-[rgba(150,175,220,0.08)] p-2">
+      <div className="flex items-center gap-2">
+        <Webhook className="h-3 w-3 text-[#3fe7b0] shrink-0" />
+        <p className="text-[9px] font-mono text-[#aab4d6] truncate flex-1" title={url}>{url}</p>
+        {lastEvent && (
+          <span className={`text-[8px] font-mono px-1.5 py-0.5 border shrink-0 ${RESULT_STYLES[lastEvent.result] ?? "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]"}`}>
+            {lastEvent.result === "sucesso" || lastEvent.result === "teste" ? `HTTP ${lastEvent.httpStatus}` : lastEvent.result.toUpperCase()}
+          </span>
+        )}
+        <button
+          onClick={() => { onTest(); setTimeout(() => refetchEvents(), 600); }}
+          className="text-[#7cf3ff] hover:text-[#7cf3ff]/80 transition-colors shrink-0"
+          title="Fase 19 — testar webhook manualmente (payload de exemplo)"
+        >
+          <Terminal className="h-3 w-3" />
+        </button>
+        <button onClick={onRemove} className="text-[#ff7a8c] hover:text-[#ff7a8c]/80 transition-colors shrink-0" aria-label="Remover webhook">
+          <Trash className="h-3 w-3" />
+        </button>
+      </div>
+      <div className="mt-1.5 space-y-0.5">
+        {!events?.length ? (
+          <p className="text-[8px] font-mono text-[#7684a0]">Nenhum disparo registrado ainda.</p>
+        ) : (
+          events.slice(0, 10).map(e => (
+            <div key={e.id} className="flex items-center gap-1.5 text-[8px] font-mono text-[#7684a0]">
+              <span className={`px-1.5 py-0.5 border shrink-0 ${RESULT_STYLES[e.result] ?? "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]"}`}>
+                {e.result}
+              </span>
+              <span className="shrink-0">{(e.httpStatus ?? 0) > 0 ? `HTTP ${e.httpStatus}` : "sem resposta"}</span>
+              <span className="shrink-0">{e.elapsedMs ?? 0}ms</span>
+              {e.errorMessage ? (
+                <span className="truncate text-[#ff7a8c]" title={e.errorMessage}>{e.errorMessage}</span>
+              ) : (
+                <span className="text-[#7684a0] whitespace-nowrap" title={String(e.createdAt)}>
+                  {new Date(e.createdAt as Date | string).toLocaleString("pt-BR")}
+                </span>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
