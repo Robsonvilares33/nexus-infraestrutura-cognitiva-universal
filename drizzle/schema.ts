@@ -341,3 +341,21 @@ export const superNotes = mysqlTable("superNotes", {
 
 export type SuperNote = typeof superNotes.$inferSelect;
 export type InsertSuperNote = typeof superNotes.$inferInsert;
+
+// Fase 20: histórico de disparos de webhooks — monitoramento por missão/webhook
+export const webhookEvents = mysqlTable("webhookEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  missionId: int("missionId").notNull(),
+  webhookId: int("webhookId").notNull(),
+  // sucesso / falha / timeout / teste (testFire)
+  result: mysqlEnum("result", ["sucesso", "falha", "timeout", "teste"]).default("falha").notNull(),
+  httpStatus: int("httpStatus").default(0),
+  elapsedMs: int("elapsedMs").default(0),
+  // Fase 21: número de tentativas realizadas (1 tentativa + retries com backoff)
+  attempts: int("attempts").default(1),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WebhookEvent = typeof webhookEvents.$inferSelect;
+export type InsertWebhookEvent = typeof webhookEvents.$inferInsert;

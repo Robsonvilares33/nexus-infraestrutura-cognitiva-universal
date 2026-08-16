@@ -26,6 +26,7 @@ import { Notifications } from "./pages/Notifications";
 import { Achievements } from "./pages/Achievements";
 import Leaderboard from "./pages/Leaderboard";
 import NexusLayout from "./components/NexusLayout";
+import Webhooks from "./pages/Webhooks";
 
 function Router() {
   return (
@@ -40,6 +41,7 @@ function Router() {
         <Route path="/modelos" component={Modelos} />
         <Route path="/projetos" component={Projetos} />
         <Route path="/config" component={Config} />
+        <Route path="/webhooks" component={Webhooks} />
         <Route path="/super-memoria" component={SuperMemoria} />
         <Route path="/status" component={Status} />
         <Route path="/docs" component={Docs} />

@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
-  BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy, Zap,
-  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2
+  BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy, Zap, Radio,
+  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2, AlertTriangle
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
 
@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { path: "/modelos", label: "Modelos", icon: Cpu },
   { path: "/projetos", label: "Projetos", icon: Folder },
   { path: "/config", label: "Config", icon: Settings },
+  { path: "/webhooks", label: "Webhooks", icon: Radio },
   { path: "/status", label: "Status", icon: Activity },
   { path: "/docs", label: "Docs", icon: FileText },
   { path: "/analytics", label: "Analytics", icon: BarChart3 },
@@ -61,6 +62,46 @@ function ReputationLine({ collapsed, isAuthenticated }: { collapsed: boolean; is
           )}
         </div>
       </div>
+    </Link>
+  );
+}
+
+// Fase 21 — badge de cota LLM compartilhado entre páginas e layout.
+// Qualquer página pode sinalizar uma falha 412 via setQuotaAlert(), que faz
+// o badge âmbar aparecer no cabeçalho e levar direto a /config.
+type QuotaContext = {
+  visible: boolean;
+  setMessage: (msg: string | null) => void;
+};
+export const QuotaAlertContext = {
+  listeners: new Set<(ctx: QuotaContext) => void>(),
+  visible: false,
+  setMessage(msg: string | null) {
+    this.visible = msg !== null;
+    this.listeners.forEach(l => l({ visible: this.visible, setMessage: m => this.setMessage(m) }));
+  },
+};
+
+export function useQuotaAlert() {
+  const [visible, setVisible] = useState(false);
+  const setMsg = useCallback((msg: string | null) => QuotaAlertContext.setMessage(msg), []);
+  useEffect(() => {
+    const listener = (ctx: QuotaContext) => setVisible(ctx.visible);
+    QuotaAlertContext.listeners.add(listener);
+    return () => { QuotaAlertContext.listeners.delete(listener); };
+  }, []);
+  return { visible, setMessage: setMsg };
+}
+
+function QuotaBadge() {
+  const { visible } = useQuotaAlert();
+  if (!visible) return null;
+  return (
+    <Link href="/config">
+      <span className="flex items-center gap-1.5 nexus-chip border-[#ffd479]/40 bg-[#ffd479]/10 text-[#ffd479] cursor-pointer hover:bg-[#ffd479]/20 transition-colors" title="Limite do LLM atingido — configure outro provedor em Config">
+        <AlertTriangle className="h-3 w-3" />
+        <span className="text-[9px] font-mono">LLM EXAURIDO</span>
+      </span>
     </Link>
   );
 }
@@ -276,6 +317,8 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
               ) : (
                 <span className="nexus-chip nexus-chip-offline" title="Sem conexão — missões recentes disponíveis em cache">OFFLINE</span>
               )}
+              {/* Fase 21 — badge de cota LLM (leva a Config para trocar provedor) */}
+              <QuotaBadge />
               <span className="hidden sm:block text-[9px] font-mono text-[#7684a0]">
                 ID: {user?.id}
               </span>

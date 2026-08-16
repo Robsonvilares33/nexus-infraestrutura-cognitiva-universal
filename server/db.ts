@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, sql, inArray, or, like } from "drizzle-orm";
+import { and,
+  gte, asc, desc, eq, sql, inArray, or, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   users, plugins, models, agents, projects, missions, memory, cognitiveFeed, universeSettings,
@@ -6,7 +7,8 @@ import {
   suggestedCategories,
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
-  pluginThreads, xpEvents, missionTemplates, missionSteps,
+  pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
+  type WebhookEvent,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -977,6 +979,16 @@ export async function removeMissionWebhook(webhookId: number, userId: number) {
 // Fail-fast: disparos externos com timeout curto para nunca travar o sistema
 const WEBHOOK_TEST_TIMEOUT_MS = 5000;
 
+// Fase 21 — retransmissão automática: número máximo de tentativas por disparo
+// (1 tentativa original + 2 retries) e tempos de espera exponencial (1s, 2s).
+const WEBHOOK_MAX_ATTEMPTS = 3;
+const WEBHOOK_RETRY_DELAY_MS = [1000, 2000];
+
+// Espera não-bloqueante entre tentativas de retry
+function webhookSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Fase 19 — teste manual de um webhook de missão (payload de exemplo).
 // Retorna o status HTTP obtido e o último disparo registrado.
 export async function testFireMissionWebhook(missionId: number, webhookId: number, userId: number) {
@@ -988,25 +1000,30 @@ export async function testFireMissionWebhook(missionId: number, webhookId: numbe
   const m = await db.select().from(missions).where(eq(missions.id, hook.missionId)).limit(1);
   if (!m[0] || m[0].userId !== userId) throw new Error("Webhook não pertence a você");
   const startedAt = Date.now();
-  let lastStatus: number = 0;
-  try {
-    const res = await fetch(hook.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": "NEXUS-MissionWebhook/1.0" },
-      body: JSON.stringify({ missionId: hook.missionId, event: "webhook.test", payload: { test: true, note: "Disparo manual de teste (NEXUS)" }, timestamp: new Date().toISOString() }),
-      signal: AbortSignal.timeout(WEBHOOK_TEST_TIMEOUT_MS),
-    });
-    lastStatus = res.status;
-  } catch (err) {
-    // Timeout (5s) ou falha de rede: status 0 indica que o endpoint não respondeu
-    lastStatus = 0;
-    void err;
-  }
+  const testBody = { missionId: hook.missionId, event: "webhook.test", payload: { test: true, note: "Disparo manual de teste (NEXUS)" }, timestamp: new Date().toISOString() };
+  // Fase 21: retransmissão automática — até WEBHOOK_MAX_ATTEMPTS tentativas
+  // com backoff exponencial quando o endpoint não responde (falha de rede/
+  // timeout) ou responde 5xx (erro transitório do servidor externo).
+  const { httpStatus, result, errorMessage, attempts } = await postWebhookWithRetry(hook.url, testBody, WEBHOOK_TEST_TIMEOUT_MS);
   const lastTriggeredAt = new Date();
   await db.update(missionWebhooks)
-    .set({ lastStatus, lastTriggeredAt })
+    .set({ lastStatus: httpStatus, lastTriggeredAt })
     .where(eq(missionWebhooks.id, webhookId));
-  return { webhookId, missionId: hook.missionId, lastStatus, lastTriggeredAt, elapsedMs: Date.now() - startedAt };
+  const elapsedMs = Date.now() - startedAt;
+  try {
+    await db.insert(webhookEvents).values({
+      missionId: hook.missionId,
+      webhookId,
+      result: httpStatus === 0 ? (errorMessage?.toLowerCase().includes("timeout") ? "timeout" : "falha") : "teste",
+      httpStatus,
+      elapsedMs,
+      attempts,
+      errorMessage,
+    });
+  } catch {
+    // Registro do histórico nunca falha o teste
+  }
+  return { webhookId, missionId: hook.missionId, lastStatus: httpStatus, lastTriggeredAt, elapsedMs, attempts };
 }
 
 export async function fireMissionWebhooks(missionId: number, payload: Record<string, unknown>) {
@@ -1014,22 +1031,135 @@ export async function fireMissionWebhooks(missionId: number, payload: Record<str
   if (!db) return;
   const hooks = await db.select().from(missionWebhooks).where(eq(missionWebhooks.missionId, missionId));
   for (const hook of hooks) {
+    const startedAt = Date.now();
+    // Fase 21: retransmissão automática com backoff exponencial — a missão
+    // espera no máximo somatório dos retries (~3s) antes de desistir
+    const { httpStatus, result, errorMessage, attempts } = await postWebhookWithRetry(
+      hook.url,
+      { missionId, event: "mission.completed", payload, timestamp: new Date().toISOString() },
+      10000,
+    );
+    await db.update(missionWebhooks)
+      .set({ lastStatus: httpStatus, lastTriggeredAt: new Date() })
+      .where(eq(missionWebhooks.id, hook.id));
     try {
-      const res = await fetch(hook.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "User-Agent": "NEXUS-MissionWebhook/1.0" },
-        body: JSON.stringify({ missionId, event: "mission.completed", payload, timestamp: new Date().toISOString() }),
-        signal: AbortSignal.timeout(10000),
+      await db.insert(webhookEvents).values({
+        missionId,
+        webhookId: hook.id,
+        result,
+        httpStatus,
+        elapsedMs: Date.now() - startedAt,
+        attempts,
+        errorMessage,
       });
-      await db.update(missionWebhooks)
-        .set({ lastStatus: res.status, lastTriggeredAt: new Date() })
-        .where(eq(missionWebhooks.id, hook.id));
     } catch {
-      await db.update(missionWebhooks)
-        .set({ lastStatus: 0, lastTriggeredAt: new Date() })
-        .where(eq(missionWebhooks.id, hook.id));
+      // Registro do histórico nunca falha o disparo da missão
     }
   }
+}
+
+// Fase 21 — POST com retransmissão automática (backoff exponencial).
+// Re-tenta apenas em falhas transitórias: rede/timeout (status 0) e 5xx.
+// 4xx é registrado como falha definitiva (o corpo enviado não mudaria o resultado).
+// test-only seam: re-exportado para os testes de vitest exercitarem a lógica de retry
+export const postWebhookWithRetryForTest = postWebhookWithRetry;
+async function postWebhookWithRetry(
+  url: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<{ httpStatus: number; result: "sucesso" | "falha"; errorMessage: string | null; attempts: number }> {
+  let httpStatus = 0;
+  let errorMessage: string | null = null;
+  let attempts = 0;
+  for (let i = 0; i < WEBHOOK_MAX_ATTEMPTS; i++) {
+    attempts += 1;
+    const isLast = i === WEBHOOK_MAX_ATTEMPTS - 1;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "NEXUS-MissionWebhook/1.0" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      httpStatus = res.status;
+      if (res.ok) return { httpStatus, result: "sucesso", errorMessage: null, attempts };
+      // 5xx é transitório — retry; 4xx não (o servidor recusou o pedido em si)
+      if (res.status >= 500 && !isLast) {
+        errorMessage = `HTTP ${res.status} (transitório)`;
+        await webhookSleep(WEBHOOK_RETRY_DELAY_MS[i] ?? WEBHOOK_RETRY_DELAY_MS[WEBHOOK_RETRY_DELAY_MS.length - 1]);
+        continue;
+      }
+      errorMessage = `HTTP ${res.status}`;
+      return { httpStatus, result: "falha", errorMessage, attempts };
+    } catch (err) {
+      // Timeout ou falha de rede: status 0 — transitório, re-tenta
+      httpStatus = 0;
+      const msg = err instanceof Error && err.message ? err.message : "Falha de rede";
+      const isTimeout = msg.includes("timeout") || msg.includes("AbortError");
+      errorMessage = isTimeout ? `Timeout — o endpoint não respondeu em ${timeoutMs / 1000}s` : "Falha de rede — o endpoint não respondeu";
+      if (!isLast) await webhookSleep(WEBHOOK_RETRY_DELAY_MS[i] ?? WEBHOOK_RETRY_DELAY_MS[WEBHOOK_RETRY_DELAY_MS.length - 1]);
+      continue;
+    }
+  }
+  return { httpStatus, result: "falha", errorMessage, attempts };
+}
+
+// Fase 21 — métricas de webhooks (taxa de sucesso, contagens, tempos médios)
+export async function webhookMetrics(userId: number, options?: { missionId?: number; days?: number }) {
+  const db = await getDb();
+  if (!db) return { total: 0, successRate: 0, countsByResult: {}, avgElapsedMs: 0, recentFailures: [] as WebhookEvent[], byDay: [] as { day: string; total: number; success: number }[] };
+  const days = options?.days ?? 30;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  // Missões que pertencem ao usuário (quando missionId não é informado)
+  let missionFilter = undefined;
+  if (options?.missionId) {
+    const m = await db.select().from(missions).where(eq(missions.id, options.missionId)).limit(1);
+    if (m.length === 0 || m[0].userId !== userId) return { total: 0, successRate: 0, countsByResult: {}, avgElapsedMs: 0, recentFailures: [], byDay: [] };
+    missionFilter = options.missionId;
+  }
+  // Coleta: total + contagem de sucesso + tempos
+  let rows: WebhookEvent[] = [];
+  if (missionFilter !== undefined) {
+    rows = await db.select().from(webhookEvents).where(and(eq(webhookEvents.missionId, missionFilter), gte(webhookEvents.createdAt, since)));
+  } else {
+    const ownedMissions = await db.select({ id: missions.id }).from(missions).where(eq(missions.userId, userId));
+    if (ownedMissions.length === 0) return { total: 0, successRate: 0, countsByResult: {}, avgElapsedMs: 0, recentFailures: [], byDay: [] };
+    rows = await db.select().from(webhookEvents).where(and(inArray(webhookEvents.missionId, ownedMissions.map(x => x.id)), gte(webhookEvents.createdAt, since)));
+  }
+  const total = rows.length;
+  const successCount = rows.filter(r => r.result === "sucesso").length;
+  const countsByResult: Record<string, number> = {};
+  for (const r of rows) countsByResult[r.result] = (countsByResult[r.result] ?? 0) + 1;
+  const avgElapsedMs = total > 0 ? Math.round(rows.reduce((s, r) => s + (r.elapsedMs ?? 0), 0) / total) : 0;
+  const recentFailures = rows.filter(r => r.result !== "sucesso").slice(0, 10);
+  // Agregação por dia
+  const byDayMap = new Map<string, { total: number; success: number }>();
+  for (const r of rows) {
+    const day = r.createdAt.toISOString().slice(0, 10);
+    const cur = byDayMap.get(day) ?? { total: 0, success: 0 };
+    cur.total += 1;
+    if (r.result === "sucesso") cur.success += 1;
+    byDayMap.set(day, cur);
+  }
+  const byDay = Array.from(byDayMap.entries())
+    .map(([day, v]) => ({ day, total: v.total, success: v.success }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  return { total, successRate: total > 0 ? Math.round((successCount / total) * 1000) / 10 : 0, countsByResult, avgElapsedMs, recentFailures, byDay };
+}
+
+// Fase 20 — histórico de disparos de webhooks (painel de monitoramento)
+export async function listWebhookEvents(missionId: number, userId: number, options?: { webhookId?: number; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const m = await db.select().from(missions).where(eq(missions.id, missionId)).limit(1);
+  if (m.length === 0 || m[0].userId !== userId) return [];
+  const rows = await db
+    .select()
+    .from(webhookEvents)
+    .where(and(eq(webhookEvents.missionId, missionId), options?.webhookId ? eq(webhookEvents.webhookId, options.webhookId) : undefined))
+    .orderBy(desc(webhookEvents.createdAt))
+    .limit(options?.limit ?? 50);
+  return rows;
 }
 
 // Semantic-ish search: match plugins whose name/description/tags contain any of the given terms

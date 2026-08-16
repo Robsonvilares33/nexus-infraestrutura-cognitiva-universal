@@ -1,0 +1,1 @@
+ALTER TABLE `webhookEvents` ADD `attempts` int DEFAULT 1;

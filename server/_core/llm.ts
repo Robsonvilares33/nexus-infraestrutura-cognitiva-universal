@@ -469,3 +469,103 @@ export async function listLLMModels(): Promise<ModelsResponse> {
 
   return (await response.json()) as ModelsResponse;
 }
+
+// Fase 20 — streaming nativo SSE do Forge: cada delta do modelo chega em tempo real.
+// O generator emite strings (textos dos deltas); se o upstream retornar 412, o
+// generator emite exatamente um erro { quota: true } via onQuota antes de fechar.
+export type StreamChunkResult =
+  | { type: "text"; text: string }
+  | { type: "done"; finishReason: string | null }
+  | { type: "quota"; message: string };
+
+export async function* sendChatStream(
+  params: InvokeParams
+): AsyncGenerator<StreamChunkResult> {
+  assertApiKey();
+
+  const payload: Record<string, unknown> = {
+    model: params.model,
+    messages: params.messages.map(normalizeMessage),
+    stream: true,
+  };
+
+  if (params.tools && params.tools.length > 0) {
+    payload.tools = params.tools;
+  }
+  const normalizedToolChoice = normalizeToolChoice(
+    params.toolChoice || params.tool_choice,
+    params.tools
+  );
+  if (normalizedToolChoice) {
+    payload.tool_choice = normalizedToolChoice;
+  }
+
+  const response = await fetch(resolveApiUrl(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${ENV.forgeApiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (response.status === 412) {
+    const errorText = await response.text().catch(() => "");
+    yield { type: "quota", message: `Cota do LLM exaurida (412): ${errorText.slice(0, 160)}` };
+    return;
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    yield { type: "quota", message: `Erro ${response.status}: ${errorText.slice(0, 160)}` };
+    return;
+  }
+
+  if (!response.body) {
+    yield { type: "quota", message: "Upstream sem corpo de streaming" };
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finishReason: string | null = null;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      // mantém a última linha incompleta no buffer
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === "[DONE]") {
+          finishReason = "stop";
+          continue;
+        }
+        try {
+          const chunk = JSON.parse(data) as {
+            choices?: { finish_reason?: string | null; delta?: { content?: string } }[];
+          };
+          const choice = chunk.choices?.[0];
+          if (choice?.delta?.content) yield { type: "text", text: choice.delta.content };
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+        } catch {
+          // linha SSE inválida — ignora
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+      await response.body.cancel();
+    } catch {
+      // corpo já cancelado
+    }
+  }
+  yield { type: "done", finishReason };
+}

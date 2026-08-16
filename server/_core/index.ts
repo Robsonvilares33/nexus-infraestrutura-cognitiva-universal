@@ -167,28 +167,53 @@ async function startServer() {
       ];
 
       // Provider preferido pelo usuário (chave própria) ou Forge embutido
-      const { invokeLLMWithProvider } = await import("../nexus-multillm");
+      const { invokeLLMWithProvider, sendStreamWithProvider, providerLabel } = await import("../nexus-multillm");
       const { getLlmSettings } = await import("../db");
       const llmSettings = await getLlmSettings(userId);
       const provider = llmSettings?.apiKey
         ? { provider: llmSettings.provider as any, apiKey: llmSettings.apiKey ?? undefined, baseUrl: llmSettings.baseUrl ?? undefined, model: llmSettings.model ?? undefined }
         : { provider: (llmSettings?.provider ?? "forge") as any, model: llmSettings?.model ?? undefined };
 
-      // Os provedores não expõem streaming nativo na camada atual; a resposta
-      // completa é quebrada em chunks sintéticos (efeito de digitação no front).
+      // Fase 20 — streaming nativo quando o provedor é o Forge embutido (SSE
+      // real do upstream); provedores externos com chave própria mantêm o
+      // comportamento sintético (compat).
       let fullText = "";
       try {
-        const result = await invokeLLMWithProvider(provider, { messages: invokeMessages });
-        const content = result.choices?.[0]?.message?.content;
-        fullText = typeof content === "string" ? content : String(content ?? "");
-        const chunkSize = 8;
-        let chunkIndex = 0;
-        for (let i = 0; i < fullText.length; i += chunkSize) {
-          chunkIndex += 1;
-          res.write(`event: chunk\ndata: ${JSON.stringify({ type: "chunk", index: chunkIndex, text: fullText.slice(i, i + chunkSize) })}\n\n`);
-          await new Promise(r => setTimeout(r, 15));
+        const isForge = !llmSettings?.apiKey && (llmSettings?.provider ?? "forge") === "forge";
+        if (isForge) {
+          const { sendChatStream } = await import("./llm");
+          let hadQuota = false;
+          const modelId = llmSettings?.model ?? undefined;
+          for await (const chunk of sendChatStream({ messages: invokeMessages, model: modelId })) {
+            if (chunk.type === "text") {
+              fullText += chunk.text;
+              res.write(`event: chunk\ndata: ${JSON.stringify({ type: "chunk", text: chunk.text })}\n\n`);
+            } else if (chunk.type === "quota") {
+              hadQuota = true;
+              const quotaMsg = /412|cota|quota/i.test(chunk.message) ? chunk.message : `Erro LLM (412): ${chunk.message.slice(0, 200)}`;
+              res.write(`event: quota\ndata: ${JSON.stringify({ type: "quota", message: quotaMsg })}\n\n`);
+              fullText = `Limite de uso do LLM embutido exaurido — configure um provedor próprio em Config (OpenAI, Anthropic, Groq, QwenCloud ou Ollama) para continuar.`;
+            }
+          }
+          if (!hadQuota) console.log(`[ask-stream] streaming Forge concluído: ${fullText.length} chars — agente: ${agent}`);
+        } else {
+          // Fase 21 — streaming nativo dos provedores externos (OpenAI,
+          // Anthropic, Groq, OpenRouter, QwenCloud, custom); Google e Ollama
+          // mantêm o chunking sintético (compat).
+          let hadQuota = false;
+          for await (const chunk of sendStreamWithProvider(provider, { messages: invokeMessages })) {
+            if (chunk.type === "text") {
+              fullText += chunk.text;
+              res.write(`event: chunk\ndata: ${JSON.stringify({ type: "chunk", text: chunk.text })}\n\n`);
+            } else if (chunk.type === "quota") {
+              hadQuota = true;
+              const quotaMsg = /412|429|limite|quota|cota/i.test(chunk.message) ? chunk.message : `Erro LLM: ${chunk.message.slice(0, 200)}`;
+              res.write(`event: quota\ndata: ${JSON.stringify({ type: "quota", message: quotaMsg })}\n\n`);
+              fullText = `Limite de uso do provedor exaurido (${provider.provider}) — verifique a cota da chave em ${providerLabel(provider.provider)} ou configure outro provedor em Config.`;
+            }
+          }
+          if (!hadQuota) console.log(`[ask-stream] LLM respondeu: ${fullText.length} chars — agente: ${agent}`);
         }
-        console.log(`[ask-stream] LLM respondeu: ${fullText.length} chars — agente: ${agent}`);
       } catch (err) {
         res.write(`event: chunk\ndata: ${JSON.stringify({ type: "error", message: String(err) })}\n\n`);
         fullText = `Erro ao consultar o modelo: ${String(err)}`;
