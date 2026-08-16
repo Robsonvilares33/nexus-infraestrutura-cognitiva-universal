@@ -168,7 +168,7 @@
 ## Backlog de sugestões futuras (aguardando aprovação do usuário)
 - [x] Backlog aprovado: streaming real do feed cognitivo para missões agendadas — implementado na Fase 13 (SSE ao vivo no console do agente; missões agendadas notificam por email/push)
 - [x] Backlog aprovado: busca semântica vetorial (embeddings) na Memória — implementado na Fase 15 (QwenCloud text-embedding-v3, busca com scores + fallback textual BM25)
-- [x] Backlog aprovado: compartilhamento de missões entre usuários — implementado na Fase 16 (exportar/importar via código base64url versionado)
+- [ ] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar) — fase futura
 
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
@@ -229,3 +229,11 @@
 - [x] Dialogar com Antigravity/MiniMax via Ponte Neural SIAOL (GET mensagens + POST avaliação colaborativa como Manus-01)
 - [x] Registrar avaliações e melhorias propostas na Super Memória (nota com embedding via QwenCloud)
 - [x] Melhorias aplicadas: SW apenas em produção + guard de reload no dev (fim do "Invalid hook call"); addMemory gera embedding na criação (RAG garantido para notas do agente); README com Fase 17; vitest 57/57; sync GitHub (PR #4)
+
+## Fase 18: Chat Multiagente ao Vivo
+- [x] Backend: módulo nexus-multichat + chat.multiAgent (9 agentes com persona; histórico de sessão; registro em memória e feed)
+- [x] Backend: injeção de contexto da Super Memória relevante (RAG vetorial + fallback textual) no prompt do chat multiagente
+- [x] Backend: resposta síncrona por tRPC (validada E2E; SSE de missões já cobre o feed cognitivo)
+- [x] Frontend: página /chat-multiagente com seletor de agente, histórico da sessão e toggle Super Memória
+- [x] Vitest coverage para o chat multiagente (nexus-multichat.test.ts, 7/7)
+- [x] Sync GitHub (PR #7) + checkpoint publicado
