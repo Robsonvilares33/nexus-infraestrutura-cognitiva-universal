@@ -139,3 +139,19 @@ Para ativar embeddings, adicione `QWEN_API_KEY` (ver `docs/ENV-TEMPLATE.md`). A 
 
 Usuários podem compartilhar missões entre si por meio de um código portátil. A página "Exportar" gera um código base64url contendo o input, o título e o resultado da missão (payload versionado `app=nexus, v1`); qualquer outro usuário cola o código no botão **Importar** da página Minha IA para adicionar a missão à sua própria lista.
 
+
+## Fase 17: Estabilidade e validação de ponta a ponta
+
+Esta fase consolidou as entregas anteriores com correções críticas de estabilidade e validação real do fluxo de compartilhamento de missões.
+
+| Melhoria | Descrição |
+|---|---|
+| Serviço worker apenas em produção | O registro do `sw.js` foi restringido a builds de produção (`import.meta.env.DEV`). No modo de desenvolvimento o SW cacheava um grafo de módulos Vite antigo (prebundles com hash expirado) e servia módulos stale junto com módulos novos, produzindo duas instâncias de React na mesma página e o erro "Invalid hook call" |
+| Recarga automática no dev | Guard em `main.tsx` que recarrega a página quando o Vite anuncia uma reconexão com sessão alterada, evitando grafos de módulos mistos |
+| Embeddings na criação de notas | `addMemory` agora gera o embedding vetorial no momento da escrita (quando `QWEN_API_KEY` está configurada), tornando notas criadas pelo loop do agente imediatamente pesquisáveis por semelhança vetorial — antes, notas do agente nasciam sem vetor e dependiam do fallback textual |
+| Importar/Exportar validado E2E | Fluxo ponta a ponta testado no navegador: exportar uma missão completada gera o código base64url versionado (`app=nexus v1`); colar o código em Importar cria a missão na lista com título, input e resultado preservados |
+| Ponte Neural SIAOL testada | Handshake GET/POST autenticado (Bearer) validado contra a API gateway local (ngrok) dos parceiros SIAOL-PRO; relatório de colaboração salvo na Super Memória do proprietário |
+
+### Como o agente não esquece (RAG garantido)
+
+Cada nota criada — pela interface da Super Memória ou pelo próprio agente durante uma missão — recebe um vetor de 1024 dimensões (`text-embedding-v3`). No momento da busca semântica (`memory_search`), as notas mais relevantes ao input da missão são injetadas no contexto do loop do agente automaticamente. Sem chave de embedding configurada, o sistema usa o fallback textual (BM25-lite) e continua funcionando sem erros.

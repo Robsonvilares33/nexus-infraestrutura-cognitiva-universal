@@ -357,9 +357,25 @@ export async function addMemory(userId: number, data: { content: string; tier?: 
   const confidence = data.confidence !== undefined ? data.confidence.toString() : null;
   const origin = data.origin || null;
   const tags = data.tags ? JSON.stringify(data.tags) : null;
+  // Phase 15 fix: generate embedding at write time so agent-loop notes become
+  // semantically searchable instead of text-fallback only.
+  let embeddingBytes: Buffer | null = null;
+  if (isEmbeddingAvailable()) {
+    try {
+      const emb = (await generateEmbedding(data.content)) as { ok: boolean; vector?: number[]; reason?: string };
+      if (emb.ok && emb.vector) {
+        const buf = Buffer.alloc(emb.vector.length * 4);
+        new Float32Array(buf.buffer).set(emb.vector);
+        embeddingBytes = buf;
+      }
+    } catch {
+      // embedding failure is non-fatal — notes still store and fall back to text search
+      embeddingBytes = null;
+    }
+  }
   await db.execute(sql`
     INSERT INTO \`memory\` (\`userId\`, \`content\`, \`tier\`, \`confidence\`, \`origin\`, \`tags\`, \`embedding\`)
-    VALUES (${userId}, ${data.content}, ${tier}, ${confidence}, ${origin}, ${tags}, ${null})
+    VALUES (${userId}, ${data.content}, ${tier}, ${confidence}, ${origin}, ${tags}, ${embeddingBytes})
   `);
   return { success: true };
 }
@@ -1540,7 +1556,7 @@ export async function searchSuperNotes(userId: number, query: string) {
 }
 
 // --- Phase 15: semantic embeddings + vector search for Super Memória ---
-import { cosineSimilarity, isEmbeddingAvailable, textRelevance } from "./nexus-embeddings";
+import { cosineSimilarity, generateEmbedding, isEmbeddingAvailable, textRelevance } from "./nexus-embeddings";
 
 async function allUserNotes(userId: number, folder?: string) {
   const db = await getDb();

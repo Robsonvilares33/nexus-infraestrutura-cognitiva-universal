@@ -160,6 +160,13 @@ export default defineConfig({
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
+    // Prevent "Invalid hook call / reading 'useState' on null" when a dependency
+    // (socket.io-client) resolves its own React copy via a different node_modules path
+    dedupe: ["react", "react-dom"],
+  },
+  optimizeDeps: {
+    // Force a single pre-bundling graph for React and socket.io to avoid dual instances
+    include: ["react", "react-dom", "react/jsx-runtime", "socket.io-client", "socket.io"],
   },
   envDir: path.resolve(import.meta.dirname),
   root: path.resolve(import.meta.dirname, "client"),
