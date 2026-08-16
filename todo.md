@@ -168,7 +168,7 @@
 ## Backlog de sugestões futuras (aguardando aprovação do usuário)
 - [x] Backlog aprovado: streaming real do feed cognitivo para missões agendadas — implementado na Fase 13 (SSE ao vivo no console do agente; missões agendadas notificam por email/push)
 - [x] Backlog aprovado: busca semântica vetorial (embeddings) na Memória — implementado na Fase 15 (QwenCloud text-embedding-v3, busca com scores + fallback textual BM25)
-- [ ] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar) — fase futura
+- [x] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar) — fase futura
 
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
