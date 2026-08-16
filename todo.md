@@ -193,3 +193,27 @@
 - [x] Frontend: console de agente com stream ao vivo e progresso iterativo (Modo Agente em Minha IA) — observabilidade em tempo real dos tool calls/resultados
 - [x] Teste de estresse da arquitetura fundida — 60/60 vitest incl. teste live; fast-fail verificado
 - [x] Sincronizar GitHub
+
+## Fase 14: Ferramentas de Computador, Super Memória, Multi-Modelo e Open Source
+- [x] Ferramentas de computador com sandbox (run_shell, read_file, write_file, edit_file, list_dir, web_fetch) — 11 testes
+- [x] Super Memória (vault estilo Obsidian): CRUD de notas, pastas, tags, links [[ ]] clicáveis — 5 testes
+- [x] Super Memória integrada ao loop do agente (agente grava descobertas) — teste de integração
+- [x] Motor multi-modelo (9 provedores: Forge, OpenAI, Anthropic, Google, Groq, OpenRouter, Ollama, QwenCloud) — validação live com QwenCloud
+- [x] Seletor de motor de IA na UI (Minha IA) com persistência por usuário (userLlmSettings)
+- [x] Docs open-source: docs/LOCAL-SETUP.md, docs/ENV-TEMPLATE.md, README reescrito
+- [x] Sincronização GitHub: PR #2 mergeado, main em 382b06e, sem segredos reais no repositório
+- [x] Limpeza do feed cognitivo: deduplicação de erros temporários, remoção de 100 entradas de teste de estresse
+- [x] 75/77 vitest passando (2 testes live de LLM bloqueados por cota exaurida da API embutida — erro externo transitório)
+- [x] Relatório final de uso e possibilidades entregue
+
+## Fase 15: RAG, Embeddings e Ponte Neural SIAOL
+- [ ] Embeddings: coluna embedding (BLOB 4KB) + embeddingUpdated na superNotes; gerar via QwenCloud text-embedding-v3 (dim 1024) com LRU cache
+- [ ] Backend: server/nexus-embeddings.ts (geração) + db.ts semanticSearchSuperNotes (cosseno em memória, fallback textual)
+- [ ] Router: superNotes.semanticSearch({query, folder}) com scores
+- [ ] RAG no agente: tool memory_search + injeção das notas relevantes no contexto inicial da missão
+- [ ] UI SuperMemoria: busca semântica (toggle na barra de busca, scores)
+- [ ] Plugin Ponte Neural SIAOL: seed no marketplace_plugins (canal symbiosis + metadados do webhook)
+- [ ] Tool do agente symbiosis_post (canal symbiosis)
+- [ ] Vitest (embeddings unit, semantic mock, RAG tool)
+- [ ] LOCAL-SETUP/README atualizados (QWEN_API_KEY opcional para embeddings)
+- [ ] Sync GitHub + checkpoint
