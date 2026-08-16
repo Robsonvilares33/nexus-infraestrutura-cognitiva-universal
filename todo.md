@@ -223,3 +223,9 @@
 - [x] Backend: endpoints missions.exportMission (código base64url com input/título/resultado/confiança, payload versionado app=nexus v1) e missions.importMission (validação + cria missão do usuário, limite 5000 chars)
 - [x] Frontend: botão Exportar nos cartões de missão da Minha IA (copia código p/ área de transferência) + botão Importar na barra de criação (dialog com textarea)
 - [x] Vitest coverage (export + import com validação de payload) — 110 testes, 108 passando (2 por cota externa 412) + checkpoint + GitHub sync
+
+## Fase 17: Validação E2E e simbiose SIAOL
+- [x] Teste ponta a ponta exportar/importar de missões (browser: exportar missão completada → colar código → importar; UI completa)
+- [x] Dialogar com Antigravity/MiniMax via Ponte Neural SIAOL (GET mensagens + POST avaliação colaborativa como Manus-01)
+- [x] Registrar avaliações e melhorias propostas na Super Memória (nota com embedding via QwenCloud)
+- [x] Melhorias aplicadas: SW apenas em produção + guard de reload no dev (fim do "Invalid hook call"); addMemory gera embedding na criação (RAG garantido para notas do agente); README com Fase 17; vitest 57/57; sync GitHub (PR #4)
