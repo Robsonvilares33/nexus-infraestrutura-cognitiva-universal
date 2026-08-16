@@ -155,3 +155,19 @@ Esta fase consolidou as entregas anteriores com correções críticas de estabil
 ### Como o agente não esquece (RAG garantido)
 
 Cada nota criada — pela interface da Super Memória ou pelo próprio agente durante uma missão — recebe um vetor de 1024 dimensões (`text-embedding-v3`). No momento da busca semântica (`memory_search`), as notas mais relevantes ao input da missão são injetadas no contexto do loop do agente automaticamente. Sem chave de embedding configurada, o sistema usa o fallback textual (BM25-lite) e continua funcionando sem erros.
+
+## Fase 18: Chat Multiagente ao vivo
+
+Nova página de conversa contínua (`/chat-multiagente`) em que o usuário escolhe um dos agentes especializados do NEXUS e conversa em sessão, com o histórico da sessão enviado como contexto e acesso à Super Memória via RAG.
+
+| Capacidade | Descrição |
+|---|---|
+| Agentes especializados | NEXUS geral + Sincronia, Pesquisa, Memória, Código, Planejamento, Crítica, Síntese, Execução e Comunicação, cada um com persona (área e estilo) injetada no system prompt (`server/nexus-multichat.ts`) |
+| RAG por mensagem | A mensagem do usuário é vetorizada (`text-embedding-v3`); as notas mais relevantes da Super Memória (scores acima de 0.2) entram no contexto. Sem chave de embedding, cai para a busca textual (mesmo fallback das missões) |
+| Provedor do usuário | A resposta usa o modelo/provedor configurado pelo usuário em Minha IA (OpenAI, Anthropic, Google, Groq, OpenRouter, Ollama, QwenCloud, custom ou Forge embutido) |
+| Memória contínua | Perguntas e respostas são registradas na Super Memória (origem `chat`, tags `chat` + agente), alimentando o RAG das próximas conversas; cada interação também gera um evento no feed cognitivo |
+| Janela de contexto | Os últimos 10 turns da sessão são enviados ao LLM, mantendo a conversa coerente sem inflar o contexto |
+
+### Configuração
+
+Nenhuma variável nova é necessária: o chat reutiliza `QWEN_API_KEY` (embeddings) e as preferências de LLM armazenadas em `userLlmSettings`. Testes: `server/nexus-multichat.test.ts` (LLM, banco e embeddings mockados, 7/7 passando).
