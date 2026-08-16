@@ -14,6 +14,8 @@ interface ChatMessage {
   isTyping?: boolean;
   ragNotes?: number;
   isStreaming?: boolean;
+  // Fase 20 — mensagem de orientação sobre cota exaurida do LLM (412)
+  isQuotaError?: boolean;
 }
 
 /** Retorna o token da sessão quando o cookie não está disponível (ex.: iframe preview). */
@@ -164,6 +166,26 @@ export default function ChatMultiagente() {
             if (data.type === "context") {
               ragNotes = data.ragNotes;
               continue;
+            }
+            // Fase 20 — cota do LLM embutido exaurida (412): exibe orientação
+            // de troca de provedor e encerra o stream sem fallback tRPC
+            if (data.type === "quota") {
+              setMessages(prev => {
+                const rest = prev.filter(m => m.id !== pendingId);
+                return [
+                  ...rest,
+                  {
+                    id: `${Date.now()}-a`,
+                    role: "assistant",
+                    content: data.message ?? "Limite de uso do LLM embutido exaurido — configure um provedor próprio em Config (OpenAI, Anthropic, Groq, QwenCloud ou Ollama) para continuar.",
+                    agentName: selectedAgent,
+                    timestamp: new Date(),
+                    isQuotaError: true,
+                    ragNotes,
+                  },
+                ];
+              });
+              return true;
             }
             if (data.type === "chunk") {
               accumulated += data.text ?? "";
@@ -356,13 +378,16 @@ export default function ChatMultiagente() {
               className={`max-w-[80%] rounded-xl border px-4 py-3 ${
                 msg.role === "user"
                   ? "bg-cyan-500/10 border-cyan-500/30"
-                  : `bg-gradient-to-br ${AGENT_COLORS[msg.agentName ?? "NEXUS"] ?? "from-cyan-500/20 to-cyan-600/5 border-cyan-400/40"}`
+                  : msg.isQuotaError
+                    ? "bg-amber-500/10 border-amber-500/40"
+                    : `bg-gradient-to-br ${AGENT_COLORS[msg.agentName ?? "NEXUS"] ?? "from-cyan-500/20 to-cyan-600/5 border-cyan-400/40"}`
               }`}
             >
               {msg.role === "assistant" && msg.agentName && (
                 <div className="flex items-center gap-1.5 mb-1.5 text-[10px] uppercase tracking-wider text-purple-300/80 font-semibold">
                   <Zap className="h-3 w-3" />
                   {msg.agentName}
+                  {msg.isQuotaError && <span className="ml-1 text-amber-300 normal-case">⚠ limite do LLM exaurido</span>}
                   {msg.isTyping && <span className="ml-1 text-slate-400 normal-case">pensando...</span>}
                   {msg.isStreaming && <span className="ml-1 text-cyan-300/80 normal-case">digitando...</span>}
                   {!msg.isTyping && msg.ragNotes !== undefined && msg.ragNotes > 0 && (

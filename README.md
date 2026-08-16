@@ -187,3 +187,18 @@ Três frentes de amadurecimento operacional: teste manual de webhooks, funcionam
 ### Configuração
 
 Nenhuma variável nova. Testes: `server/nexus-webhooks-f19.test.ts` (5/5, incluindo o contrato fail-fast de 5s) e `pnpm test` completo com 120/122 (2 falhas externas por cota 412 do LLM de teste).
+
+## Fase 20: Monitoramento de webhooks, streaming nativo e alerta de cota LLM
+
+Três frentes de observabilidade e desempenho: histórico de disparos de webhooks por missão, streaming real via Forge API no chat e orientação clara quando a cota do LLM embutido se esgota.
+
+| Capacidade | Descrição |
+|---|---|
+| Histórico de disparos (`webhook_events`) | Nova tabela registra **todo** disparo — automático (`fireMissionWebhooks`) ou manual (`testFire`) — com `result` (`sucesso`/`falha`/`timeout`/`teste`), `httpStatus`, `elapsedMs`, `errorMessage` e payload; procedimento `webhooks.listEvents` com verificação de posse da missão |
+| Painel de monitoramento | Cada webhook no diálogo de "Minha IA" exibe os últimos disparos: chip de resultado colorido, código HTTP, tempo de resposta e mensagem de erro quando houver; disparar um teste atualiza o histórico automaticamente |
+| Streaming nativo (`sendChatStream`) | O SSE `/api/chat/ask-stream` agora usa o streaming real da Forge API (`stream: true`, deltas SSE por linha `data:`); provedores externos continuam com chunking sintético e o fallback tRPC permanece |
+| Alerta de cota (412) | Quando o upstream retorna 412 ("usage exhausted"), o stream emite o evento `quota` com orientação de configuração em Config (OpenAI, Anthropic, Groq, QwenCloud ou Ollama); a bolha do chat exibe fundo âmbar com "⚠ limite do LLM exaurido", sem cair no fallback tRPC (que repetiria o mesmo erro) |
+
+### Configuração
+
+Nenhuma variável nova. Testes: `server/nexus-webhooks-f20.test.ts` (7/7: registro de eventos, classificação de timeout, ownership, detecção de 412, parsing de SSE real com `ReadableStream` e erro não-2xx) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste.

@@ -6,7 +6,7 @@ import {
   suggestedCategories,
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
-  pluginThreads, xpEvents, missionTemplates, missionSteps,
+  pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
   type InsertUser, type InsertProjectShare
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -1006,7 +1006,22 @@ export async function testFireMissionWebhook(missionId: number, webhookId: numbe
   await db.update(missionWebhooks)
     .set({ lastStatus, lastTriggeredAt })
     .where(eq(missionWebhooks.id, webhookId));
-  return { webhookId, missionId: hook.missionId, lastStatus, lastTriggeredAt, elapsedMs: Date.now() - startedAt };
+  // Fase 20: registra o disparo de teste no histórico de monitoramento
+  const elapsedMs = Date.now() - startedAt;
+  try {
+    const isTimeout = lastStatus === 0 && elapsedMs >= WEBHOOK_TEST_TIMEOUT_MS - 500;
+    await db.insert(webhookEvents).values({
+      missionId: hook.missionId,
+      webhookId,
+      result: lastStatus === 0 ? (isTimeout ? "timeout" : "falha") : "teste",
+      httpStatus: lastStatus,
+      elapsedMs,
+      errorMessage: lastStatus === 0 ? (isTimeout ? "Timeout — o endpoint não respondeu em 5s" : "Falha de rede — o endpoint não respondeu") : null,
+    });
+  } catch {
+    // Registro do histórico nunca falha o teste
+  }
+  return { webhookId, missionId: hook.missionId, lastStatus, lastTriggeredAt, elapsedMs };
 }
 
 export async function fireMissionWebhooks(missionId: number, payload: Record<string, unknown>) {
@@ -1014,6 +1029,10 @@ export async function fireMissionWebhooks(missionId: number, payload: Record<str
   if (!db) return;
   const hooks = await db.select().from(missionWebhooks).where(eq(missionWebhooks.missionId, missionId));
   for (const hook of hooks) {
+    const startedAt = Date.now();
+    let httpStatus = 0;
+    let result: "sucesso" | "falha" = "falha";
+    let errorMessage: string | null = null;
     try {
       const res = await fetch(hook.url, {
         method: "POST",
@@ -1021,15 +1040,43 @@ export async function fireMissionWebhooks(missionId: number, payload: Record<str
         body: JSON.stringify({ missionId, event: "mission.completed", payload, timestamp: new Date().toISOString() }),
         signal: AbortSignal.timeout(10000),
       });
+      httpStatus = res.status;
+      result = res.status >= 200 && res.status < 300 ? "sucesso" : "falha";
+      if (!res.ok) errorMessage = `HTTP ${res.status}`;
       await db.update(missionWebhooks)
         .set({ lastStatus: res.status, lastTriggeredAt: new Date() })
         .where(eq(missionWebhooks.id, hook.id));
-    } catch {
+    } catch (err) {
+      // Timeout (10s) ou falha de rede: status 0 — endpoint não respondeu
+      httpStatus = 0;
+      result = "falha";
+      errorMessage = err instanceof Error && err.message ? err.message : "Falha de rede";
       await db.update(missionWebhooks)
         .set({ lastStatus: 0, lastTriggeredAt: new Date() })
         .where(eq(missionWebhooks.id, hook.id));
     }
+    // Fase 20: registra o disparo no histórico de monitoramento
+    try {
+      await db.insert(webhookEvents).values({ missionId, webhookId: hook.id, result, httpStatus, elapsedMs: Date.now() - startedAt, errorMessage });
+    } catch {
+      // Registro do histórico nunca falha o disparo da missão
+    }
   }
+}
+
+// Fase 20 — histórico de disparos de webhooks (painel de monitoramento)
+export async function listWebhookEvents(missionId: number, userId: number, options?: { webhookId?: number; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const m = await db.select().from(missions).where(eq(missions.id, missionId)).limit(1);
+  if (m.length === 0 || m[0].userId !== userId) return [];
+  const rows = await db
+    .select()
+    .from(webhookEvents)
+    .where(and(eq(webhookEvents.missionId, missionId), options?.webhookId ? eq(webhookEvents.webhookId, options.webhookId) : undefined))
+    .orderBy(desc(webhookEvents.createdAt))
+    .limit(options?.limit ?? 50);
+  return rows;
 }
 
 // Semantic-ish search: match plugins whose name/description/tags contain any of the given terms
