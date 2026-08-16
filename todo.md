@@ -271,4 +271,4 @@
 - [x] Frontend: badge de cota LLM na barra superior (aparece após resposta 412, leva a Config)
 - [x] Vitest coverage da Fase 21 (retry/backoff, metrics, streaming externo)
 - [x] README.md e todo.md com seção Fase 21
-- [ ] Sync GitHub (branch sync-fase21b + PR #10)
+- [x] Sync GitHub (branch sync-fase21b + PR #10 aberto em https://github.com/Robsonvilares33/nexus-infraestrutura-cognitiva-universal/pull/10; árvores HEAD == checkpoint b0399074, sem tokens)  e PR #9 mesclado Sync GitHub (branch sync-fase21b + PR #10)
