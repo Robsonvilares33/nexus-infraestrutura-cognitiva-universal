@@ -1,6 +1,62 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
+
+// Fase 19 — streaming SSE das respostas do chat multiagente com fallback síncrono.
+interface StreamCallbacks {
+  onChunk: (text: string) => void;
+  onDone: (meta: { agentName: string; ragNotes: number }) => void;
+  onError: (err: string) => void;
+}
+
+function streamChat(
+  signal: AbortSignal,
+  message: string,
+  agent: string,
+  history: { role: "user" | "assistant"; content: string }[],
+  cb: StreamCallbacks,
+): void {
+  const params = new URLSearchParams({
+    message,
+    agent,
+    history: history.length > 0 ? JSON.stringify(history) : "",
+  });
+  const evt = new EventSource(`/api/chat/ask-stream?${params.toString()}`, { withCredentials: true });
+  let closed = false;
+  signal.addEventListener("abort", () => { if (!closed) { closed = true; evt.close(); } });
+  evt.onmessage = e => {
+    const data = e.data;
+    try {
+      const json = JSON.parse(data);
+      if (typeof json.text === "string") cb.onChunk(json.text);
+      else if (json.done || json.agentName !== undefined) cb.onDone({ agentName: json.agentName ?? "NEXUS", ragNotes: json.ragNotes ?? 0 });
+      else if (json.error) { closed = true; evt.close(); cb.onError(String(json.error.message ?? json.error)); }
+    } catch { /* malformed chunk — ignore */ }
+  };
+  evt.addEventListener("chunk", e => {
+    try {
+      const json = JSON.parse(e.data);
+      if (typeof json.text === "string") cb.onChunk(json.text);
+    } catch { /* ignore */ }
+  });
+  evt.addEventListener("done", e => {
+    closed = true;
+    evt.close();
+    try {
+      const json = JSON.parse(e.data);
+      cb.onDone({ agentName: json.agentName ?? "NEXUS", ragNotes: json.ragNotes ?? 0 });
+    } catch { cb.onDone({ agentName: "NEXUS", ragNotes: 0 }); }
+  });
+  evt.addEventListener("error", () => {
+    if (!closed) {
+      closed = true;
+      evt.close();
+      cb.onError("STREAM_UNAVAILABLE");
+    }
+  });
+  // Segurança: fecha após 2 minutos mesmo sem evento done
+  setTimeout(() => { if (!closed) { closed = true; evt.close(); cb.onError("STREAM_TIMEOUT"); } }, 2 * 60 * 1000);
+}
 import { Streamdown } from "streamdown";
 import { Bot, Send, Brain, Zap } from "lucide-react";
 
@@ -36,6 +92,73 @@ export default function ChatMultiagente() {
 
   const { data: agents } = trpc.chat.multiAgentAgents.useQuery();
   const chatMutation = trpc.chat.multiAgent.useMutation();
+  const abortRef = useRef<AbortController | null>(null);
+  const streamingRef = useRef(false);
+
+  // Fase 19 — envio com streaming SSE; cai para a mutation síncrona se o
+  // stream falhar (offline, proxy ou erro de rede).
+  const sendWithStreaming = (
+    text: string,
+    agentArg: string,
+    history: { role: "user" | "assistant"; content: string }[],
+    pendingId: string,
+  ): void => {
+    streamingRef.current = true;
+    abortRef.current = new AbortController();
+    let responseText = "";
+    let meta = { agentName: "NEXUS", ragNotes: 0 };
+    streamChat(
+      abortRef.current.signal,
+      text,
+      agentArg,
+      history,
+      {
+        onChunk: text => {
+          responseText += text;
+          setMessages(prev =>
+            prev.map(m => (m.id === pendingId ? { ...m, content: responseText } : m))
+          );
+        },
+        onDone: m => {
+          streamingRef.current = false;
+          meta = m;
+          setMessages(prev =>
+            prev.map(m => (m.id === pendingId ? { ...m, ragNotes: m.ragNotes ?? m.ragNotes, done: true } : m))
+          );
+        },
+        onError: err => {
+          streamingRef.current = false;
+          if (err === "STREAM_UNAVAILABLE" || err === "STREAM_TIMEOUT") {
+            // Fallback síncrono: mutation tRPC
+            chatMutation
+              .mutateAsync({ message: text, agent: agentArg, history })
+              .then(result => {
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === pendingId
+                      ? { ...m, content: result.response, agentName: result.agentName, ragNotes: result.ragNotes }
+                      : m
+                  )
+                );
+              })
+              .catch(() => {
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === pendingId
+                      ? { ...m, content: responseText || `Erro ao consultar o agente: ${err}` }
+                      : m
+                  )
+                );
+              });
+          } else {
+            setMessages(prev =>
+              prev.map(m => (m.id === pendingId ? { ...m, content: responseText || `Erro ao consultar o agente: ${err}` } : m))
+            );
+          }
+        },
+      }
+    );
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -68,41 +191,52 @@ export default function ChatMultiagente() {
         isTyping: true,
       },
     ]);
-    try {
-      const result = await chatMutation.mutateAsync({
-        message: text,
-        agent: selectedAgent === "NEXUS" ? "all" : selectedAgent,
-        history: ragEnabled ? history : undefined,
-      });
-      setMessages(prev => {
-        const updated = prev.filter(m => m.id !== pendingId);
-        return [
-          ...updated,
-          {
-            id: `${Date.now()}-a`,
-            role: "assistant",
-            content: result.response,
-            agentName: result.agentName,
-            timestamp: new Date(),
-            ragNotes: result.ragNotes,
-          },
-        ];
-      });
-    } catch (error) {
-      setMessages(prev => {
-        const updated = prev.filter(m => m.id !== pendingId);
-        return [
-          ...updated,
-          {
-            id: `${Date.now()}-err`,
-            role: "assistant",
-            content: `Erro ao consultar o agente: ${String(error)}`,
-            agentName: selectedAgent,
-            timestamp: new Date(),
-          },
-        ];
-      });
+    if (!window.EventSource) {
+      // Navegador sem SSE: mutation síncrona tradicional
+      try {
+        const result = await chatMutation.mutateAsync({
+          message: text,
+          agent: selectedAgent === "NEXUS" ? "all" : selectedAgent,
+          history: ragEnabled ? history : undefined,
+        });
+        setMessages(prev => {
+          const updated = prev.filter(m => m.id !== pendingId);
+          return [
+            ...updated,
+            {
+              id: `${Date.now()}-a`,
+              role: "assistant",
+              content: result.response,
+              agentName: result.agentName,
+              timestamp: new Date(),
+              ragNotes: result.ragNotes,
+            },
+          ];
+        });
+      } catch (error) {
+        setMessages(prev => {
+          const updated = prev.filter(m => m.id !== pendingId);
+          return [
+            ...updated,
+            {
+              id: `${Date.now()}-err`,
+              role: "assistant",
+              content: `Erro ao consultar o agente: ${String(error)}`,
+              agentName: selectedAgent,
+              timestamp: new Date(),
+            },
+          ];
+        });
+      }
+      return;
     }
+    // Fase 19: streaming SSE com chunks ao vivo
+    sendWithStreaming(
+      text,
+      selectedAgent === "NEXUS" ? "all" : selectedAgent,
+      ragEnabled ? history : [],
+      pendingId,
+    );
   };
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -186,7 +320,8 @@ export default function ChatMultiagente() {
                 <div className="flex items-center gap-1.5 mb-1.5 text-[10px] uppercase tracking-wider text-purple-300/80 font-semibold">
                   <Zap className="h-3 w-3" />
                   {msg.agentName}
-                  {msg.isTyping && <span className="ml-1 text-slate-400 normal-case">pensando...</span>}
+                  {msg.isTyping && !msg.content && <span className="ml-1 text-slate-400 normal-case">pensando...</span>}
+                  {msg.isTyping && msg.content && <span className="ml-1 text-emerald-300/80 normal-case animate-pulse">●</span>}
                   {!msg.isTyping && msg.ragNotes !== undefined && msg.ragNotes > 0 && (
                     <span className="ml-1 text-[10px] normal-case text-emerald-300/80">
                       ({msg.ragNotes} nota{msg.ragNotes > 1 ? "s" : ""} da Memória)
@@ -194,7 +329,9 @@ export default function ChatMultiagente() {
                   )}
                 </div>
               )}
-              {msg.isTyping ? (
+              {msg.isTyping && !msg.content ? (
+                // Fase 19 — enquanto nenhum chunk chega, mostra "pensando";
+                // assim que o primeiro chunk chega, o texto é renderizado ao vivo.
                 <div className="flex gap-1 py-1">
                   <span className="h-2 w-2 rounded-full bg-purple-400/60 animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="h-2 w-2 rounded-full bg-purple-400/60 animate-bounce" style={{ animationDelay: "120ms" }} />
@@ -228,7 +365,7 @@ export default function ChatMultiagente() {
           />
           <button
             onClick={() => void handleSend()}
-            disabled={!input.trim() || chatMutation.isPending}
+            disabled={!input.trim() || chatMutation.isPending || streamingRef.current}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-purple-500 to-cyan-500 text-black transition-transform duration-100 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100"
             aria-label="Enviar"
           >
@@ -236,7 +373,7 @@ export default function ChatMultiagente() {
           </button>
         </div>
         <p className="mt-2 text-[10px] text-slate-500">
-          As mensagens e respostas são registradas na Memória. Histórico da sessão (últimos 20 turnos) é enviado como contexto.
+          As mensagens e respostas são registradas na Memória. Histórico da sessão (últimos 20 turnos) é enviado como contexto. A resposta chega ao vivo por streaming.
         </p>
       </div>
     </div>

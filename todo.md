@@ -237,3 +237,12 @@
 - [x] Frontend: página /chat-multiagente com seletor de agente, histórico da sessão e toggle Super Memória
 - [x] Vitest coverage para o chat multiagente (nexus-multichat.test.ts, 7/7)
 - [x] Sync GitHub (PR #7) + checkpoint publicado
+
+## Fase 19: Webhooks por missão + modo offline + streaming no chat
+- [x] Backend: webhooks.testFire (disparo manual com payload de exemplo + retorno do lastStatus/lastTriggeredAt); UI mostra último disparo com data e botão "Testar"
+- [x] Frontend: UI de webhooks por missão em Minha IA já existe (diálogo por missão com add/list/remove + HTTP status) — adicionado botão Testar + data do último disparo
+- [x] Modo offline: service worker estende cache para missões + notas da Super Memória (com header x-nexus-offline)
+- [x] Frontend: modo offline real — lista de missões e notas revisável sem conexão
+- [x] Streaming SSE no chat multiagente (GET /api/chat/ask-stream com eventos chunk/done, renderização ao vivo corrigida + fallback síncrono tRPC)
+- [x] Vitest coverage para as três capacidades (webhooks.testFire + chunking SSE)
+- [x] README Fase 19 + checkpoint + sync GitHub (PR #8)

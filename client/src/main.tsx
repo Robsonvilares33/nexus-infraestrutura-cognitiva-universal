@@ -96,6 +96,23 @@ if ("serviceWorker" in navigator && window.isSecureContext === true && !import.m
   });
 }
 
+// Rede de segurança em DEV: remove qualquer service worker ativo (registrado
+// antes da versão atual) e limpa os caches antigos. Isso impede que um gráfico
+// de módulos Vite obsoleto (hashes de prebundle antigos) seja mesclado com o
+// novo, o que cria duas identidades de React e causa "Invalid hook call".
+if (import.meta.env.DEV) {
+  try {
+    navigator.serviceWorker?.getRegistrations?.().then((regs) =>
+      Promise.all(regs.map((r) => r.unregister())),
+    );
+    caches?.keys().then((keys) =>
+      Promise.all(keys.map((k) => caches.delete(k))),
+    );
+  } catch {
+    /* não bloquear a inicialização */
+  }
+}
+
 createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>

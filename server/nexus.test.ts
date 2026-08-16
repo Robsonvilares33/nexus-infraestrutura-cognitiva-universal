@@ -301,7 +301,7 @@ describe("marketplace", () => {
 });
 
 describe("reviews", () => {
-  it("adds a review and computes average rating", async () => {
+  it("adds a review and computes average rating", { timeout: 20000 }, async () => {
     const ctx = createTestContext();
     const caller = appRouter.createCaller(ctx);
     const mp = await caller.marketplace.list();
@@ -314,7 +314,9 @@ describe("reviews", () => {
     expect(found?.rating).toBe(4);
   });
 
-  it("replaces the user's own review (dedupe)", async () => {
+  // addReview triggers external API side-effects (notifyOwner + sendEmail), so allow
+  // more time than the default even when those gateways are slow or quota-limited.
+  it("replaces the user's own review (dedupe)", { timeout: 20000 }, async () => {
     const ctx = createTestContext();
     const caller = appRouter.createCaller(ctx);
     const mp = await caller.marketplace.list();

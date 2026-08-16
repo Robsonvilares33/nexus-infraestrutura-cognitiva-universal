@@ -22,6 +22,22 @@ export async function setupVite(app: Express, server: Server) {
 
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
+    // Fase 19 — nunca servir o SPA para rotas de API/SSE nem para recursos
+    // internos do Vite/estáticos; qualquer rota /api é registrada ANTES
+    // desta montagem em index.ts (fallback do SPA devolve HTML 200 para
+    // rotas /api registradas depois dele).
+    if (
+      req.path.startsWith("/api/") ||
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/@") ||
+      req.path.startsWith("/node_modules") ||
+      req.path.startsWith("/assets/") ||
+      req.path === "/sw.js" ||
+      req.path === "/manifest.json" ||
+      req.path === "/favicon.ico"
+    ) {
+      return next();
+    }
     const url = req.originalUrl;
 
     try {
@@ -61,7 +77,21 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  app.use("*", (req, res, next) => {
+    // Fase 19 — nunca servir o SPA para rotas de API/SSE nem para recursos
+    // internos do Vite/estáticos.
+    if (
+      req.path.startsWith("/api/") ||
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/@") ||
+      req.path.startsWith("/node_modules") ||
+      req.path.startsWith("/assets/") ||
+      req.path === "/sw.js" ||
+      req.path === "/manifest.json" ||
+      req.path === "/favicon.ico"
+    ) {
+      return next();
+    }
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

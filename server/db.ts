@@ -1185,7 +1185,7 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
         subject,
         html: `<h2>${subject.replace(/</g, "&lt;")}</h2><p>${body.replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>`,
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(5000),
     });
     return res.ok;
   } catch {

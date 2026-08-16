@@ -189,6 +189,17 @@ export default function MinhaIA() {
     onSuccess: () => refetchWebhooks(),
     onError: e => toast.error(e.message || "Erro ao remover webhook"),
   });
+  const testFireMutation = trpc.webhooks.testFire.useMutation({
+    onSuccess: () => {
+      toast.success("Disparo de teste enviado! Confira o status HTTP abaixo.");
+      refetchWebhooks();
+    },
+    onError: e => toast.error(e.message || "Erro no disparo de teste"),
+  });
+  const handleTestFire = (missionId: number) => {
+    if (testFireMutation.isPending) return;
+    testFireMutation.mutate({ missionId });
+  };
 
   const handleAddWebhook = () => {
     if (!hookMissionId || !hookUrl.trim()) {
@@ -684,6 +695,18 @@ export default function MinhaIA() {
                         URLs externas acionadas automaticamente quando esta missão é executada.
                       </DialogDescription>
                     </DialogHeader>
+                    <DialogFooter className="pt-1 border-t border-[rgba(150,175,220,0.08)]">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleTestFire(m.id)}
+                        disabled={testFireMutation.isPending}
+                        className="bg-[rgba(63,231,176,0.08)] text-[#3fe7b0] border border-[#3fe7b0]/30 hover:bg-[#3fe7b0]/15 text-[10px] font-mono"
+                      >
+                        <Zap className="h-3 w-3" />
+                        {testFireMutation.isPending ? "TESTANDO..." : "TESTAR DISPARO"}
+                      </Button>
+                    </DialogFooter>
                     <div className="space-y-3">
                       <div className="flex gap-2">
                         <Input
@@ -712,6 +735,7 @@ export default function MinhaIA() {
                               {h.lastStatus !== null && h.lastStatus !== undefined && (
                                 <span className={`text-[8px] font-mono px-1.5 py-0.5 border shrink-0 ${h.lastStatus >= 200 && h.lastStatus < 300 ? "text-[#3fe7b0] border-[rgba(63,231,176,0.25)]" : "text-[#ff7a8c] border-[rgba(255,122,140,0.25)]"}`}>
                                   HTTP {h.lastStatus}
+                                  {h.lastTriggeredAt ? ` · ${new Date(h.lastTriggeredAt).toLocaleString("pt-BR")}` : ""}
                                 </span>
                               )}
                               <button

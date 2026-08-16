@@ -45,15 +45,12 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
-  if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-
   // Setup Socket.IO for real-time events
   setupSocketIO(server);
+
+  // ATENÇÃO (Fase 19): qualquer rota /api registrada DEPOIS de setupVite/
+  // serveStatic é engolida pelo fallback do SPA (HTML 200). As rotas SSE
+  // precisam ser registradas ANTES do fallback — por isso ficam aqui.
 
   // Fase 13 — SSE streaming dos passos do agente (consola em tempo real)
   // GET /api/missions/stream/:missionId — emite steps novos como text/event-stream;
@@ -110,6 +107,75 @@ async function startServer() {
       else res.end();
     }
   });
+
+  // Fase 19 — SSE streaming das respostas do chat multiagente (texto ao vivo).
+  // GET /api/chat/ask-stream?message=&agent=&history= — cada chunk chega como
+  // um evento "chunk"; a resposta completa fecha com o evento "done" e o
+  // registro na memória ocorre em background (como na mutation síncrona).
+  // Registrada ANTES de setupVite/serveStatic (fallback do SPA devolve HTML
+  // para qualquer rota /api registrada depois).
+  app.get("/api/chat/ask-stream", async (req, res) => {
+    try {
+      let user;
+      try {
+        const { sdk } = await import("./sdk");
+        user = await sdk.authenticateRequest(req);
+      } catch { /* fall through */ }
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+
+      const message = String(req.query.message ?? "").trim();
+      if (!message) return res.status(400).json({ error: "message is required" });
+      const agent = String(req.query.agent ?? "").trim() || undefined;
+      let history: { role: "user" | "assistant"; content: string }[] = [];
+      try {
+        const raw = String(req.query.history ?? "");
+        if (raw) history = JSON.parse(raw);
+      } catch { history = []; }
+      if (!Array.isArray(history) || history.length > 10) history = [];
+
+      const { multiAgentChat } = await import("../nexus-multichat");
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Simula streaming por chunks de tamanho fixo (o LLM roda síncrono;
+      // chunks de 12–20 caracteres a cada ~25ms dão sensação de digitação)
+      const CHUNK = 14;
+      const result = await multiAgentChat(user.id, { message, agent, history });
+      const text = result.response;
+      let cursor = 0;
+      const timer = setInterval(() => {
+        if (cursor < text.length) {
+          const slice = text.slice(cursor, cursor + CHUNK);
+          cursor += slice.length;
+          res.write(`event: chunk\ndata: ${JSON.stringify({ text: slice })}\n\n`);
+        } else {
+          clearInterval(timer);
+          res.write(`event: done\ndata: ${JSON.stringify({ agentName: result.agentName, ragNotes: result.ragNotes })}\n\n`);
+          res.end();
+        }
+      }, 25);
+      req.on("close", () => clearInterval(timer));
+      // Limite de segurança: 2 minutos por resposta
+      setTimeout(() => { clearInterval(timer); res.end(); }, 2 * 60 * 1000);
+    } catch (error) {
+      if (!res.headersSent) res.status(500).json({ error: String(error) });
+      else {
+                  res.write(`event: error\ndata: ${JSON.stringify({ message: String(error) })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  // development mode uses Vite, production mode uses static files
+  if (process.env.NODE_ENV === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
 
   // Scheduled mission callback endpoint
   app.post("/api/scheduled/mission-*", async (req, res) => {

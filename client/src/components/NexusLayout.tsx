@@ -274,7 +274,7 @@ export default function NexusLayout({ children }: { children: React.ReactNode })
               {isOnline ? (
                 <span className="nexus-chip nexus-chip-online">CONECTADO</span>
               ) : (
-                <span className="nexus-chip nexus-chip-offline" title="Sem conexão — missões recentes disponíveis em cache">OFFLINE</span>
+                <span className="nexus-chip nexus-chip-offline" title="Fase 19 — sem conexão: missões recentes, notas da Super Memória e feed cognitivo continuam disponíveis em cache local">OFFLINE · CACHE DISPONÍVEL</span>
               )}
               <span className="hidden sm:block text-[9px] font-mono text-[#7684a0]">
                 ID: {user?.id}
