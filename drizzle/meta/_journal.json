@@ -127,6 +127,13 @@
       "when": 1786911767499,
       "tag": "0017_flimsy_thunderbolts",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1786922761449,
+      "tag": "0018_modern_maximus",
+      "breakpoints": true
     }
   ]
 }

@@ -351,6 +351,8 @@ export const webhookEvents = mysqlTable("webhookEvents", {
   result: mysqlEnum("result", ["sucesso", "falha", "timeout", "teste"]).default("falha").notNull(),
   httpStatus: int("httpStatus").default(0),
   elapsedMs: int("elapsedMs").default(0),
+  // Fase 21: número de tentativas realizadas (1 tentativa + retries com backoff)
+  attempts: int("attempts").default(1),
   errorMessage: text("errorMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

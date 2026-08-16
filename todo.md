@@ -262,3 +262,13 @@
 - [x] Vitest coverage da Fase 20 (registro de eventos + detecção 412)
 - [x] README.md e todo.md com seção Fase 20
 - [x] Sync GitHub (branch sync-fase20b + PR #9 aberto em https://github.com/Robsonvilares33/nexus-infraestrutura-cognitiva-universal/pull/9; PR #8 da Fase 19 mesclado em e67d1a9)
+
+## Fase 21: Retransmissão de webhooks, streaming nativo de provedores externos e badge de cota
+- [x] Backend: retry de webhooks falhos (falha/timeout ganham retry com backoff exponencial, máx 3 tentativas, registradas em webhook_events)
+- [x] Backend: procedimento webhooks.metrics ({missionId?, periodo}) com taxa de sucesso, contagens por resultado e tempos médios
+- [x] Backend: streaming nativo de provedores externos (OpenAI/Anthropic/Groq/Qwen) no sendChatStream quando o usuário escolhe outro provedor, mantendo fallback sintético
+- [x] Frontend: página de métricas de webhooks com taxa de sucesso, gráfico de tempos e eventos recentes
+- [x] Frontend: badge de cota LLM na barra superior (aparece após resposta 412, leva a Config)
+- [x] Vitest coverage da Fase 21 (retry/backoff, metrics, streaming externo)
+- [x] README.md e todo.md com seção Fase 21
+- [ ] Sync GitHub (branch sync-fase21b + PR #10)

@@ -6,7 +6,7 @@
  * Ollama instance. Each adapter speaks its native API and returns the same
  * InvokeResult shape the agent loop already consumes.
  */
-import { invokeLLM, type InvokeParams, type InvokeResult } from "./_core/llm";
+import { invokeLLM, type InvokeParams, type InvokeResult, type StreamChunkResult } from "./_core/llm";
 import { ENV } from "./_core/env";
 
 export type LlmProvider = "forge" | "openai" | "anthropic" | "google" | "groq" | "openrouter" | "ollama" | "qwen" | "custom";
@@ -183,6 +183,180 @@ export async function invokeLLMWithProvider(cfg: ProviderConfig, params: InvokeP
   if (cfg.provider === "anthropic") return invokeAnthropic(cfg, params);
   if (cfg.provider === "google") return invokeGoogle(cfg, params);
   return invokeOpenAICompatible(cfg, params);
+}
+
+// ---------- Fase 21 — streaming nativo de provedores externos ----------
+// Adapters SSE por provedor; ollama local e google (REST) usam fallback
+// sintético. Anthropic usa seu SSE nativo (event: content_block_delta).
+
+async function* streamOpenAICompatible(cfg: ProviderConfig, params: InvokeParams): AsyncGenerator<StreamChunkResult> {
+  const apiKey = cfg.provider === "ollama" ? "" : (cfg.apiKey || ENV.forgeApiKey || "");
+  if (!apiKey) throw new Error(`Chave de API não configurada para o provedor "${cfg.provider}"`);
+  const base = cfg.baseUrl || defaultBaseUrl(cfg.provider);
+  const url = `${base.replace(/\/$/, "")}/chat/completions`;
+  const payload = { ...buildOpenAIStylePayload(cfg, params), stream: true };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 412 || res.status === 429) {
+    const errorText = await res.text().catch(() => "");
+    yield { type: "quota", message: `Limite do provedor ${providerLabel(cfg.provider)} atingido (${res.status}): ${errorText.slice(0, 160)}` };
+    return;
+  }
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "");
+    yield { type: "quota", message: `Erro ${res.status} do ${providerLabel(cfg.provider)}: ${errorText.slice(0, 160)}` };
+    return;
+  }
+  yield* parseOpenAISse(res);
+}
+
+async function* streamAnthropic(cfg: ProviderConfig, params: InvokeParams): AsyncGenerator<StreamChunkResult> {
+  const apiKey = cfg.apiKey;
+  if (!apiKey) throw new Error(`Chave de API Anthropic não configurada (userLlmSettings.apiKey)`);
+  const base = cfg.baseUrl || "https://api.anthropic.com/v1";
+  const anthropicMessages = params.messages.map((m) => ({
+    role: m.role === "function" ? "user" : m.role === "tool" ? "user" : m.role,
+    content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+  })) as { role: string; content: string }[];
+  const payload: Record<string, unknown> = {
+    model: cfg.model || "claude-sonnet-4",
+    max_tokens: params.max_tokens ?? params.maxTokens ?? 8192,
+    stream: true,
+    messages: anthropicMessages,
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${base.replace(/\/$/, "")}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 412 || res.status === 429) {
+    const errorText = await res.text().catch(() => "");
+    yield { type: "quota", message: `Limite do provedor Anthropic atingido (${res.status}): ${errorText.slice(0, 160)}` };
+    return;
+  }
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "");
+    yield { type: "quota", message: `Erro ${res.status} do Anthropic: ${errorText.slice(0, 160)}` };
+    return;
+  }
+  yield* parseAnthropicSse(res);
+}
+
+// Parser SSE OpenAI-compat: lines "data: {...}" com choices[0].delta.content
+async function* parseOpenAISse(res: Response): AsyncGenerator<StreamChunkResult> {
+  if (!res.body) { yield { type: "quota", message: "Upstream sem corpo de streaming" }; return; }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finishReason: string | null = null;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === "[DONE]") { finishReason = "stop"; continue; }
+        try {
+          const chunk = JSON.parse(data) as { choices?: { finish_reason?: string | null; delta?: { content?: string } }[] };
+          const choice = chunk.choices?.[0];
+          if (choice?.delta?.content) yield { type: "text", text: choice.delta.content };
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+        } catch {
+          // linha SSE inválida — ignora
+        }
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); await res.body.cancel(); } catch {}
+  }
+  yield { type: "done", finishReason };
+}
+
+// Parser SSE Anthropic: events "content_block_delta" com delta.text
+async function* parseAnthropicSse(res: Response): AsyncGenerator<StreamChunkResult> {
+  if (!res.body) { yield { type: "quota", message: "Upstream sem corpo de streaming" }; return; }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finishReason: string | null = null;
+  let currentEvent = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        if (line.startsWith("event:")) { currentEvent = line.slice(6).trim(); continue; }
+        if (line.startsWith("data:")) {
+          const data = line.slice(5).trim();
+          if (currentEvent === "content_block_delta") {
+            try {
+              const chunk = JSON.parse(data) as { delta?: { text?: string } };
+              if (chunk.delta?.text) yield { type: "text", text: chunk.delta.text };
+            } catch {}
+          } else if (currentEvent === "message_stop") {
+            finishReason = "stop";
+          }
+        }
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); await res.body.cancel(); } catch {}
+  }
+  yield { type: "done", finishReason };
+}
+
+// Fase 21 — streaming nativo por provedor externo (fallback sintético para
+// ollama local e google, que não têm SSE simples neste adapter).
+const STREAMING_NATIVE_PROVIDERS: LlmProvider[] = ["openai", "anthropic", "groq", "openrouter", "qwen", "custom"];
+
+export async function* sendStreamWithProvider(
+  cfg: ProviderConfig,
+  params: InvokeParams,
+): AsyncGenerator<StreamChunkResult> {
+  const native = STREAMING_NATIVE_PROVIDERS.includes(cfg.provider);
+  if (cfg.provider === "anthropic" && cfg.apiKey) {
+    yield* streamAnthropic(cfg, params);
+    return;
+  }
+  if (native && (cfg.apiKey || cfg.provider === "ollama")) {
+    yield* streamOpenAICompatible(cfg, params);
+    return;
+  }
+  // Fallback sintético para provedores sem SSE neste adapter (google, ollama
+  // sem rede confiável, ou chave ausente)
+  const result = await invokeLLMWithProvider(cfg, params);
+  const content = result.choices?.[0]?.message?.content;
+  const text = typeof content === "string" ? content : String(content ?? "");
+  yield { type: "text", text };
+  yield { type: "done", finishReason: "stop" };
 }
 
 /** Human-readable provider label */

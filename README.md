@@ -202,3 +202,19 @@ Três frentes de observabilidade e desempenho: histórico de disparos de webhook
 ### Configuração
 
 Nenhuma variável nova. Testes: `server/nexus-webhooks-f20.test.ts` (7/7: registro de eventos, classificação de timeout, ownership, detecção de 412, parsing de SSE real com `ReadableStream` e erro não-2xx) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste.
+
+## Fase 21: Retransmissão automática de webhooks, streaming nativo de provedores externos e métricas
+
+Robustez de integrações (retry com backoff exponencial), streaming real para todos os provedores de LLM e um painel completo de métricas de disparos.
+
+| Capacidade | Descrição |
+|---|---|
+| Retry com backoff | Novo helper compartilhado `postWebhookWithRetry` (1ª tentativa + até 2 retransmissões com backoff exponencial de 1s → 2s; máximo 3 tentativas). Apenas falhas transitórias são retentadas: 5xx, timeout e rede — erros 4xx são definitivos e registrados sem retry |
+| Coluna `attempts` | A tabela `webhook_events` ganhou `attempts` (padrão 1); todo disparo grava quantas tentativas foram feitas, e a UI exibe o ícone de retentativa quando `attempts > 1` |
+| Streaming nativo externo | `sendStreamWithProvider` (nexus-multillm) implementa SSE real para OpenAI/Groq/OpenRouter/Qwen (formato compat com OpenAI) e Anthropic (SSE nativo); o SSE do chat (`/api/chat/ask-stream`) roteia: Forge → `sendChatStream`, demais → `sendStreamWithProvider`; fallback sintético permanece para provedores sem SSE ou sem chave |
+| Métricas de webhooks | Novo procedimento `webhooks.metrics` (posse validada) retorna `total`, `successRate`, `countsByResult`, `avgElapsedMs`, `recentFailures` e agregação `byDay`; o painel `/webhooks` exibe KPIs, gráfico de barras por dia, falhas recentes e tabela de eventos, com filtros por missão e janela de dias |
+| Badge de cota LLM | `QuotaAlertContext` + `QuotaBadge` no cabeçalho global: qualquer página pode disparar o alerta (o chat já dispara no evento `quota`); badge âmbar "LLM EXAURIDO" leva direto a `/config` para trocar de provedor |
+
+### Configuração
+
+Nenhuma variável nova. Testes: `server/nexus-webhooks-f21.test.ts` (8/8: backoff 500→falha completa, sucesso na 2ª tentativa, 4xx definitivo, rede com ECONNRESET, métricas por dia, SSE OpenAI-compat e evento `quota` 412) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).

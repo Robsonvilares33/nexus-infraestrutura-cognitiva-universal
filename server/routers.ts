@@ -23,7 +23,7 @@ import {
   listAllUsers, updateUserRole, setMarketplacePluginApproved, listAllMarketplacePlugins, deleteAnyMarketplacePlugin, getPlatformStats,
   getUserProfile, upsertUserProfile, getUserMissionsHistory, getUserInstalledPlugins,
   getUserMarketplaceInstalls, getUserReviews, getUserSharedProjects,
-  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks, testFireMissionWebhook, listWebhookEvents,
+  addMissionWebhook, listMissionWebhooks, removeMissionWebhook, fireMissionWebhooks, testFireMissionWebhook, listWebhookEvents, webhookMetrics,
   addInAppNotification, markNotificationRead, markAllNotificationsRead, listUserNotifications, countUnreadNotifications,
   sendEmail, evaluateAchievements, listUserAchievements, markAchievementsSeen,
   searchMarketplacePluginsByTerms,
@@ -1115,6 +1115,10 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
     listEvents: protectedProcedure
       .input(z.object({ missionId: z.number(), webhookId: z.number().optional(), limit: z.number().min(1).max(200).optional() }))
       .query(async ({ ctx, input }) => listWebhookEvents(input.missionId, ctx.user.id, { webhookId: input.webhookId, limit: input.limit })),
+    // Fase 21 — métricas de webhooks (taxa de sucesso, tempos, falhas recentes, por dia)
+    metrics: protectedProcedure
+      .input(z.object({ missionId: z.number().optional(), days: z.number().min(1).max(365).optional() }))
+      .query(async ({ ctx, input }) => webhookMetrics(ctx.user.id, { missionId: input.missionId, days: input.days })),
   }),
 
   categories: router({

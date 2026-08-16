@@ -170,6 +170,11 @@ export default function ChatMultiagente() {
             // Fase 20 — cota do LLM embutido exaurida (412): exibe orientação
             // de troca de provedor e encerra o stream sem fallback tRPC
             if (data.type === "quota") {
+              // Fase 21 — acende o badge "LLM EXAURIDO" do cabeçalho (leva a Config)
+              try {
+                const { QuotaAlertContext } = await import("@/components/NexusLayout");
+                QuotaAlertContext.setMessage(data.message ?? "Limite do LLM atingido — configure outro provedor em Config.");
+              } catch {}
               setMessages(prev => {
                 const rest = prev.filter(m => m.id !== pendingId);
                 return [
