@@ -118,4 +118,24 @@ npm install
 npm test
 ```
 
-A suíte de testes (Vitest) cobre rotas tRPC, validação de plugins, colaboração, threads, XP, reputação, templates de missão e o callback de push de notificações — mais de 50 testes passando.
+A suíte de testes (Vitest) cobre rotas tRPC, validação de plugins, colaboração, threads, XP, reputação, templates de missão, embeddings semânticos, busca semântica, RAG no agente e ferramentas de computador — cerca de 100 testes no total.
+
+## Fase 15: Super Memória semântica (RAG + embeddings)
+
+A Super Memória agora gera embeddings vetoriais automaticamente para cada nota e os usa para busca semântica e recuperação em missões (RAG).
+
+| Recurso | Descricao |
+|---|---|
+| Embeddings automaticos | Notas indexadas via QwenCloud `text-embedding-v3` (1024d, LRU cache) ao criar/editar |
+| Busca semantica | Toggle na barra de busca da Super Memória com pontuação de relevância por nota |
+| Fallback textual | Sem chave configurada, a busca decai para matching textual BM25 |
+| RAG em missões | O agente injeta as notas mais relevantes no contexto de cada missão |
+| Ferramenta `memory_search` | O agente consulta a Super Memória semanticamente durante a execução |
+| Ferramenta `symbiosis_post` | O agente envia mensagens como nó `Manus-01` na Ponte Neural SIAOL |
+
+Para ativar embeddings, adicione `QWEN_API_KEY` (ver `docs/ENV-TEMPLATE.md`). A ponte neural é opcional: defina `SIAOL_BRIDGE_URL` e `SIAOL_BRIDGE_TOKEN`; sem eles a ferramenta fica desativada e o sistema funciona normalmente. Detalhes completos em `docs/LOCAL-SETUP.md`.
+
+## Fase 16: Compartilhamento de Missões
+
+Usuários podem compartilhar missões entre si por meio de um código portátil. A página "Exportar" gera um código base64url contendo o input, o título e o resultado da missão (payload versionado `app=nexus, v1`); qualquer outro usuário cola o código no botão **Importar** da página Minha IA para adicionar a missão à sua própria lista.
+
