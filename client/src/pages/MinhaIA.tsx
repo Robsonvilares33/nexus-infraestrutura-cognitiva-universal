@@ -189,6 +189,20 @@ export default function MinhaIA() {
     onSuccess: () => refetchWebhooks(),
     onError: e => toast.error(e.message || "Erro ao remover webhook"),
   });
+  // Fase 19 — teste manual de um webhook (payload de exemplo, timeout de 5s)
+  const testFireMutation = trpc.webhooks.testFire.useMutation({
+    onSuccess: res => {
+      if (res.lastStatus >= 200 && res.lastStatus < 300) {
+        toast.success(`Webhook testado com sucesso — HTTP ${res.lastStatus} (${res.elapsedMs}ms)`);
+      } else if (res.lastStatus === 0) {
+        toast.error("Webhook não respondeu (falha de rede ou timeout de 5s)");
+      } else {
+        toast.warning(`Webhook respondeu com HTTP ${res.lastStatus} (${res.elapsedMs}ms)`);
+      }
+      refetchWebhooks();
+    },
+    onError: e => toast.error(e.message || "Erro ao testar webhook"),
+  });
 
   const handleAddWebhook = () => {
     if (!hookMissionId || !hookUrl.trim()) {
@@ -714,6 +728,22 @@ export default function MinhaIA() {
                                   HTTP {h.lastStatus}
                                 </span>
                               )}
+                              {h.lastTriggeredAt !== null && h.lastTriggeredAt !== undefined && (
+                                <span className="text-[8px] font-mono text-[#7684a0] whitespace-nowrap shrink-0" title={String(h.lastTriggeredAt)}>
+                                  {new Date(h.lastTriggeredAt as Date | string).toLocaleString("pt-BR")}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => {
+                                  if (!hookMissionId) return;
+                                  testFireMutation.mutate({ missionId: hookMissionId, webhookId: h.id });
+                                }}
+                                disabled={testFireMutation.isPending}
+                                className="text-[#7cf3ff] hover:text-[#7cf3ff]/80 transition-colors shrink-0 disabled:opacity-40"
+                                title="Fase 19 — testar webhook manualmente (payload de exemplo)"
+                              >
+                                <Terminal className="h-3 w-3" />
+                              </button>
                               <button
                                 onClick={() => removeWebhookMutation.mutate({ webhookId: h.id })}
                                 className="text-[#ff7a8c] hover:text-[#ff7a8c]/80 transition-colors shrink-0"

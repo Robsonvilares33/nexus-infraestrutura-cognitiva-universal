@@ -1,8 +1,9 @@
 import { trpc } from "@/lib/trpc";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
-import { Bot, Send, Brain, Zap } from "lucide-react";
+import { Bot, Send, Brain, Zap, Wifi, WifiOff } from "lucide-react";
+import { COOKIE_NAME } from "@/const";
 
 interface ChatMessage {
   id: string;
@@ -12,6 +13,23 @@ interface ChatMessage {
   timestamp: Date;
   isTyping?: boolean;
   ragNotes?: number;
+  isStreaming?: boolean;
+}
+
+/** Retorna o token da sessão quando o cookie não está disponível (ex.: iframe preview). */
+function getSessionToken(): string | null {
+  try {
+    const raw = sessionStorage.getItem("manus-cookie");
+    if (raw) {
+      const prefix = `${COOKIE_NAME}=`;
+      const pair = raw.split(";").find(s => s.trim().startsWith(prefix));
+      const token = pair?.trim().slice(prefix.length);
+      if (token) return token;
+    }
+  } catch {
+    /* sessionStorage indisponível */
+  }
+  return null;
 }
 
 const AGENT_COLORS: Record<string, string> = {
@@ -33,9 +51,12 @@ export default function ChatMultiagente() {
   const [ragEnabled, setRagEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const { data: agents } = trpc.chat.multiAgentAgents.useQuery();
   const chatMutation = trpc.chat.multiAgent.useMutation();
+  const [streamMode, setStreamMode] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,25 +90,15 @@ export default function ChatMultiagente() {
       },
     ]);
     try {
-      const result = await chatMutation.mutateAsync({
-        message: text,
-        agent: selectedAgent === "NEXUS" ? "all" : selectedAgent,
-        history: ragEnabled ? history : undefined,
-      });
-      setMessages(prev => {
-        const updated = prev.filter(m => m.id !== pendingId);
-        return [
-          ...updated,
-          {
-            id: `${Date.now()}-a`,
-            role: "assistant",
-            content: result.response,
-            agentName: result.agentName,
-            timestamp: new Date(),
-            ragNotes: result.ragNotes,
-          },
-        ];
-      });
+      if (streamMode) {
+        const ok = await streamChat(pendingId, text, ragEnabled ? history : undefined);
+        if (!ok) {
+          // Falha no SSE: recai automaticamente para o tRPC (Fase 19)
+          await tRpcFallback(pendingId, text, ragEnabled ? history : undefined);
+        }
+      } else {
+        await tRpcFallback(pendingId, text, ragEnabled ? history : undefined);
+      }
     } catch (error) {
       setMessages(prev => {
         const updated = prev.filter(m => m.id !== pendingId);
@@ -104,6 +115,163 @@ export default function ChatMultiagente() {
       });
     }
   };
+
+  /** Fase 19 — streaming SSE com efeito de digitação; resolve `true` no sucesso. */
+  const streamChat = useCallback(
+    async (
+      pendingId: string,
+      text: string,
+      history?: { role: "user" | "assistant"; content: string }[],
+    ): Promise<boolean> => {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      const params = new URLSearchParams({
+        message: text,
+        agent: selectedAgent === "NEXUS" ? "all" : selectedAgent,
+      });
+      if (history?.length) params.set("history", JSON.stringify(history));
+      const headers: Record<string, string> = {};
+      const token = getSessionToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      try {
+        const res = await fetch(`/api/chat/ask-stream?${params.toString()}`, {
+          headers,
+          credentials: "include",
+          signal: abortRef.current.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.body) throw new Error("Sem corpo de resposta");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let ragNotes: number | undefined;
+        let started = false;
+        let accumulated = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            let data: any;
+            try {
+              data = JSON.parse(line.slice(5));
+            } catch {
+              continue;
+            }
+            if (data.type === "context") {
+              ragNotes = data.ragNotes;
+              continue;
+            }
+            if (data.type === "chunk") {
+              accumulated += data.text ?? "";
+              if (!started) {
+                started = true;
+                // Sai do estado "pensando..." no primeiro chunk — a bolha
+                // nunca mais fica travada no estado de thinking (Fase 19).
+                setMessages(prev =>
+                  prev.map(m => (m.id === pendingId ? { ...m, isTyping: false, isStreaming: true, content: accumulated } : m)),
+                );
+              } else {
+                setMessages(prev =>
+                  prev.map(m => (m.id === pendingId ? { ...m, content: accumulated } : m)),
+                );
+              }
+              continue;
+            }
+            if (data.type === "error") {
+              throw new Error(String(data.message ?? "Erro no stream"));
+            }
+            if (data.type === "done") {
+              setMessages(prev => {
+                const rest = prev.filter(m => m.id !== pendingId);
+                return [
+                  ...rest,
+                  {
+                    id: `${Date.now()}-a`,
+                    role: "assistant",
+                    content: data.response ?? accumulated,
+                    agentName: data.agentName ?? selectedAgent,
+                    timestamp: new Date(),
+                    ragNotes,
+                  },
+                ];
+              });
+              return true;
+            }
+          }
+        }
+        // Stream fechou sem evento "done": finaliza com o acumulado
+        setMessages(prev => {
+          const rest = prev.filter(m => m.id !== pendingId);
+          return [
+            ...rest,
+            {
+              id: `${Date.now()}-a`,
+              role: "assistant",
+              content: accumulated,
+              agentName: selectedAgent,
+              timestamp: new Date(),
+              ragNotes,
+            },
+          ];
+        });
+        return true;
+      } catch (error) {
+        if (abortRef.current?.signal.aborted) return false;
+        console.warn("[Chat] SSE falhou, usando fallback tRPC:", error);
+        // Remove a bolha pendente para o fallback recriar
+        setMessages(prev => prev.filter(m => m.id !== pendingId));
+        return false;
+      }
+    },
+    [selectedAgent],
+  );
+
+  /** Fallback tRPC síncrono (Fase 19) quando o streaming não estiver disponível. */
+  const tRpcFallback = useCallback(
+    async (
+      pendingId: string,
+      text: string,
+      history?: { role: "user" | "assistant"; content: string }[],
+    ) => {
+      const result = await chatMutation.mutateAsync({
+        message: text,
+        agent: selectedAgent === "NEXUS" ? "all" : selectedAgent,
+        history,
+      });
+      setMessages(prev => {
+        const updated = prev.filter(m => m.id !== pendingId);
+        return [
+          ...updated,
+          {
+            id: `${Date.now()}-a`,
+            role: "assistant",
+            content: result.response,
+            agentName: result.agentName,
+            timestamp: new Date(),
+            ragNotes: result.ragNotes,
+          },
+        ];
+      });
+    },
+    [chatMutation, selectedAgent],
+  );
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => {
+    const update = () => setIsOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -138,6 +306,15 @@ export default function ChatMultiagente() {
               className="accent-cyan-400"
             />
             Super Memória
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer" title="Fase 19 — resposta ao vivo (streaming SSE)">
+            <input
+              type="checkbox"
+              checked={streamMode}
+              onChange={e => setStreamMode(e.target.checked)}
+              className="accent-cyan-400"
+            />
+            Streaming
           </label>
         </div>
       </div>
@@ -187,6 +364,7 @@ export default function ChatMultiagente() {
                   <Zap className="h-3 w-3" />
                   {msg.agentName}
                   {msg.isTyping && <span className="ml-1 text-slate-400 normal-case">pensando...</span>}
+                  {msg.isStreaming && <span className="ml-1 text-cyan-300/80 normal-case">digitando...</span>}
                   {!msg.isTyping && msg.ragNotes !== undefined && msg.ragNotes > 0 && (
                     <span className="ml-1 text-[10px] normal-case text-emerald-300/80">
                       ({msg.ragNotes} nota{msg.ragNotes > 1 ? "s" : ""} da Memória)
@@ -235,9 +413,15 @@ export default function ChatMultiagente() {
             <Send className="h-4 w-4" />
           </button>
         </div>
-        <p className="mt-2 text-[10px] text-slate-500">
-          As mensagens e respostas são registradas na Memória. Histórico da sessão (últimos 20 turnos) é enviado como contexto.
-        </p>
+        <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">
+          <span>
+            As mensagens e respostas são registradas na Memória. Histórico da sessão (últimos 20 turnos) é enviado como contexto.
+          </span>
+          <span className="flex items-center gap-1.5">
+            {isOnline ? <Wifi className="h-3 w-3 text-emerald-400/70" /> : <WifiOff className="h-3 w-3 text-red-400/70" />}
+            {isOnline ? "online" : "offline — cache PWA ativo"}
+          </span>
+        </div>
       </div>
     </div>
   );

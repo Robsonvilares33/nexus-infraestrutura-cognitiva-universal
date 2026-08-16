@@ -111,6 +111,101 @@ async function startServer() {
     }
   });
 
+  // Fase 19 — SSE streaming das respostas do chat multiagente (texto ao vivo).
+  // GET /api/chat/ask-stream?message=&agent=&history= — cada chunk chega como
+  // um evento "chunk"; a resposta completa fecha com o evento "done" e o
+  // registro na memória ocorre em background (como na mutation síncrona).
+  // Registrada ANTES de setupVite/serveStatic (fallback do SPA devolve HTML
+  // para qualquer rota /api registrada depois).
+  app.get("/api/chat/ask-stream", async (req, res) => {
+    try {
+      let user;
+      try {
+        const { sdk } = await import("./sdk");
+        user = await sdk.authenticateRequest(req);
+      } catch { /* fall through to 401 */ }
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+
+      const message = String(req.query.message ?? "").trim();
+      if (!message) return res.status(400).json({ error: "message is required" });
+      const agent = String(req.query.agent ?? "").trim() || undefined;
+      let history: { role: "user" | "assistant"; content: string }[] = [];
+      try {
+        const raw = String(req.query.history ?? "").trim();
+        if (raw) history = JSON.parse(raw);
+        if (!Array.isArray(history)) history = [];
+        history = history
+          .filter(h => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string")
+          .slice(-20);
+      } catch { history = []; }
+
+      console.log(`[ask-stream] pedido recebido — message: ${message.slice(0, 60)} | agent: ${agent ?? "all"} | history: ${history.length}`);
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      const userId = user.id;
+
+      // Prepara o contexto do agente (persona + RAG da Super Memória) em background
+      const { buildAgentSystemPrompt, buildRagContext } = await import("../nexus-multichat");
+      const [systemPrompt, ragContext] = await Promise.all([
+        buildAgentSystemPrompt(agent && agent !== "all" ? agent : ""),
+        buildRagContext(userId, message).catch(() => ""),
+      ]);
+
+      // Emite o contexto usado (para o frontend mostrar notas RAG aplicadas)
+      res.write(`event: chunk\ndata: ${JSON.stringify({ type: "context", ragNotes: ragContext ? ragContext.split("\n").filter(l => l.startsWith("-")).length : 0 })}\n\n`);
+
+      const historyMessages = history.map(h => ({ role: h.role, content: h.content }));
+      const invokeMessages = [
+        { role: "system" as const, content: ragContext ? `${systemPrompt}\n\n---\n${ragContext}` : systemPrompt },
+        ...historyMessages,
+        { role: "user" as const, content: message },
+      ];
+
+      // Provider preferido pelo usuário (chave própria) ou Forge embutido
+      const { invokeLLMWithProvider } = await import("../nexus-multillm");
+      const { getLlmSettings } = await import("../db");
+      const llmSettings = await getLlmSettings(userId);
+      const provider = llmSettings?.apiKey
+        ? { provider: llmSettings.provider as any, apiKey: llmSettings.apiKey ?? undefined, baseUrl: llmSettings.baseUrl ?? undefined, model: llmSettings.model ?? undefined }
+        : { provider: (llmSettings?.provider ?? "forge") as any, model: llmSettings?.model ?? undefined };
+
+      // Os provedores não expõem streaming nativo na camada atual; a resposta
+      // completa é quebrada em chunks sintéticos (efeito de digitação no front).
+      let fullText = "";
+      try {
+        const result = await invokeLLMWithProvider(provider, { messages: invokeMessages });
+        const content = result.choices?.[0]?.message?.content;
+        fullText = typeof content === "string" ? content : String(content ?? "");
+        const chunkSize = 8;
+        let chunkIndex = 0;
+        for (let i = 0; i < fullText.length; i += chunkSize) {
+          chunkIndex += 1;
+          res.write(`event: chunk\ndata: ${JSON.stringify({ type: "chunk", index: chunkIndex, text: fullText.slice(i, i + chunkSize) })}\n\n`);
+          await new Promise(r => setTimeout(r, 15));
+        }
+        console.log(`[ask-stream] LLM respondeu: ${fullText.length} chars — agente: ${agent}`);
+      } catch (err) {
+        res.write(`event: chunk\ndata: ${JSON.stringify({ type: "error", message: String(err) })}\n\n`);
+        fullText = `Erro ao consultar o modelo: ${String(err)}`;
+      }
+
+      const agentNameText = agent && agent !== "all" ? agent : "";
+      // Registro em background (memória + feed) — não bloqueia o done
+      registerStreamChat(userId, agentNameText, message, fullText).catch(() => {});
+
+      res.write(`event: done\ndata: ${JSON.stringify({ type: "done", response: fullText, agentName: agentNameText || "NEXUS" })}\n\n`);
+      res.end();
+    } catch (error) {
+      if (!res.headersSent) res.status(500).json({ error: String(error) });
+      else res.end();
+    }
+  });
+
   // Scheduled mission callback endpoint
   app.post("/api/scheduled/mission-*", async (req, res) => {
     try {
@@ -207,6 +302,20 @@ async function startServer() {
       res.status(500).json({ error: String(error) });
     }
   });
+
+  // Fase 19 — registro do chat streaming em background (memória + feed cognitivo)
+  async function registerStreamChat(
+    userId: number,
+    agentName: string,
+    userMessage: string,
+    responseText: string,
+  ): Promise<void> {
+    const { addMemory, addFeedEvent } = await import("../db");
+    const label = agentName ? ` ${agentName}` : "";
+    await addMemory(userId, { content: `[Chat Agente${label}] ${userMessage.slice(0, 300)}`, origin: "chat", tags: ["chat", agentName || "nexus"] }).catch(() => {});
+    await addMemory(userId, { content: `[Chat Agente${label}] Resposta: ${responseText.slice(0, 200)}`, origin: "chat", tags: ["chat", "response"] }).catch(() => {});
+    await addFeedEvent(userId, { eventType: "mission", message: `[Chat] Mensagem para ${agentName || "NEXUS"}: ${userMessage.slice(0, 80)}` }).catch(() => {});
+  }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);
