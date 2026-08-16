@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
-import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu, Terminal, Globe } from "lucide-react";
+import { Brain, Send, Zap, Bot, CheckCircle2, AlertTriangle, Clock, Calendar, Timer, Trash2, Webhook, Trash, Cpu, Terminal, Globe, QrCode, FileDown, FileUp } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription
@@ -288,6 +288,34 @@ export default function MinhaIA() {
     }
   };
 
+  // Compartilhamento de missões (exportar/importar)
+  const handleExport = async (missionId: number) => {
+    try {
+      const { code, title } = await trpc.missions.exportMission.useQuery({ missionId }, { enabled: false }).refetch().then(r => r.data as { code: string; title: string });
+      try { await navigator.clipboard.writeText(code); toast.success(`Missão "${title}" copiada — compartilhe o código com outro usuário.`); } catch { toast.success("Código da missão gerado (copie abaixo):"); }
+    } catch (error) {
+      toast.error("Erro ao exportar missão: " + String(error));
+    }
+  };
+
+  const [importCode, setImportCode] = useState("");
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  const importMutation = trpc.missions.importMission.useMutation({
+    onSuccess: (r) => { toast.success(`Missão "${r.title}" importada! Está na sua lista — execute-a quando quiser.`); refetchMissions(); },
+    onError: (e) => toast.error("Erro ao importar: " + String(e.message)),
+  });
+
+  const handleImport = async () => {
+    const code = importCode.trim();
+    if (!code) { toast.error("Cole o código da missão primeiro."); return; }
+    try {
+      await importMutation.mutateAsync({ code });
+      setImportCode("");
+      setImportDialogOpen(false);
+    } catch { /* handled by onError */ }
+  };
+
   const handleUnschedule = async (missionId: number) => {
     try {
       await unscheduleMutation.mutateAsync({ missionId });
@@ -338,7 +366,37 @@ export default function MinhaIA() {
         <div className="flex items-center gap-2 mb-3">
           <Zap className="h-4 w-4 text-[#7cf3ff]" />
           <span className="text-xs font-mono text-[#7684a0] tracking-wider">ENTREGAR MISSÃO</span>
+          <button
+            onClick={() => setImportDialogOpen(true)}
+            className="ml-auto flex items-center gap-1 text-[9px] font-mono tracking-wider text-[#3fe7b0] border border-[#3fe7b0]/30 rounded px-2 py-0.5 hover:bg-[#3fe7b0]/10 transition-colors"
+            title="Importar missão compartilhada por outro usuário"
+          >
+            <FileUp className="h-3 w-3" /> IMPORTAR
+          </button>
         </div>
+        <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+          <DialogContent className="bg-[#0a0f1a] border-[rgba(150,175,220,0.12)] text-[#e2e8f4]">
+            <DialogHeader>
+              <DialogTitle className="text-sm font-mono text-[#e2e8f4] flex items-center gap-2"><FileUp className="h-4 w-4 text-[#3fe7b0]" /> Importar Missão</DialogTitle>
+              <DialogDescription className="text-[10px] font-mono text-[#7684a0]">
+                Cole o código de missão compartilhado por outro usuário do NEXUS.
+              </DialogDescription>
+            </DialogHeader>
+            <textarea
+              value={importCode}
+              onChange={e => setImportCode(e.target.value)}
+              className="w-full h-24 rounded border border-[rgba(150,175,220,0.15)] bg-[rgba(3,5,14,0.6)] text-[10px] font-mono text-[#e2e8f4] p-2 focus:outline-none focus:border-[#3fe7b0]/50 resize-none"
+              placeholder="Cole aqui o código da missão…"
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setImportDialogOpen(false)} className="border-[rgba(150,175,220,0.15)] text-[#aab4d6]">Cancelar</Button>
+              <Button onClick={handleImport} disabled={importMutation.isPending} className="bg-[#3fe7b0]/10 text-[#3fe7b0] border border-[#3fe7b0]/30 hover:bg-[#3fe7b0]/20">
+                <FileUp className="h-4 w-4 mr-1" />
+                {importMutation.isPending ? "Importando…" : "Importar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <div className="flex items-center gap-2 mb-3">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
@@ -522,6 +580,10 @@ export default function MinhaIA() {
               }`}>{m.status.toUpperCase()}</span>
               <p className="text-xs font-mono text-[#aab4d6] flex-1 truncate">{m.input}</p>
               <span className="text-[8px] font-mono text-[#7684a0]">{new Date(m.createdAt).toLocaleDateString()}</span>
+              {/* Export button: compartilha a missão com outro usuário */}
+              <button className="text-[#c9b8ff] hover:text-[#c9b8ff]/80 transition-colors shrink-0" title="Exportar (compartilhar)" onClick={() => handleExport(m.id)}>
+                <FileDown className="h-3.5 w-3.5" />
+              </button>
               {/* Schedule button for completed missions */}
               {m.status === 'completed' && !m.isScheduled && (
                 <Dialog open={scheduleDialogOpen && scheduleMissionId === m.id} onOpenChange={open => {

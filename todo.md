@@ -166,9 +166,9 @@
 - [x] README.md atualizado com Reputação, Notificações em tempo real, Templates de Missão e Indicador de conexão
 
 ## Backlog de sugestões futuras (aguardando aprovação do usuário)
-- [ ] Backlog aprovado: streaming real do feed cognitivo para missões agendadas (missões agendadas já notificam por email/push; streaming no feed pode ser adicionado em fase futura)
-- [ ] Backlog aprovado: busca semântica vetorial (embeddings) na Memória (busca semântica via LLM já funciona; embeddings exigem provedor vetorial a definir)
-- [ ] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar)
+- [x] Backlog aprovado: streaming real do feed cognitivo para missões agendadas — implementado na Fase 13 (SSE ao vivo no console do agente; missões agendadas notificam por email/push)
+- [x] Backlog aprovado: busca semântica vetorial (embeddings) na Memória — implementado na Fase 15 (QwenCloud text-embedding-v3, busca com scores + fallback textual BM25)
+- [ ] Backlog aprovado: compartilhamento de missões entre usuários (exportar/importar) — fase futura
 
 ## Phase 11 Follow-up
 - [x] Testes agora se autolimpam (afterEach/afterAll removem entradas vitest do cognitiveFeed) — 54/54 passando
@@ -207,13 +207,19 @@
 - [x] Relatório final de uso e possibilidades entregue
 
 ## Fase 15: RAG, Embeddings e Ponte Neural SIAOL
-- [ ] Embeddings: coluna embedding (BLOB 4KB) + embeddingUpdated na superNotes; gerar via QwenCloud text-embedding-v3 (dim 1024) com LRU cache
-- [ ] Backend: server/nexus-embeddings.ts (geração) + db.ts semanticSearchSuperNotes (cosseno em memória, fallback textual)
-- [ ] Router: superNotes.semanticSearch({query, folder}) com scores
-- [ ] RAG no agente: tool memory_search + injeção das notas relevantes no contexto inicial da missão
-- [ ] UI SuperMemoria: busca semântica (toggle na barra de busca, scores)
-- [ ] Plugin Ponte Neural SIAOL: seed no marketplace_plugins (canal symbiosis + metadados do webhook)
-- [ ] Tool do agente symbiosis_post (canal symbiosis)
-- [ ] Vitest (embeddings unit, semantic mock, RAG tool)
-- [ ] LOCAL-SETUP/README atualizados (QWEN_API_KEY opcional para embeddings)
-- [ ] Sync GitHub + checkpoint
+- [x] Embeddings: coluna embedding (BLOB 4KB) + embeddingUpdatedAt na superNotes; gerados via QwenCloud text-embedding-v3 (dim 1024) com LRU cache
+- [x] Backend: server/nexus-embeddings.ts (geração, cosseno, fallback textual BM25) + db.ts semanticSearchSuperNotes (cosseno em memória)
+- [x] Router: superNotes.semanticSearch({query, folder}) com scores + reindexEmbedding + availability
+- [x] RAG no agente: tool memory_search + injeção das notas relevantes no contexto inicial da missão
+- [x] UI SuperMemoria: busca semântica (toggle na barra de busca, badges de pontuação)
+- [x] Plugin Ponte Neural SIAOL: seed no marketplace_plugins (canal symbiosis + metadados)
+- [x] Tool do agente symbiosis_post (canal symbiosis, Manus-01)
+- [x] Vitest (embeddings unit, semantic mock, RAG tool) — 23 novos testes, 100 total
+- [x] LOCAL-SETUP/ENV-TEMPLATE atualizados (QWEN_API_KEY opcional para embeddings, SIAOL_BRIDGE_URL/_TOKEN)
+- [x] Sync GitHub (PR #3 mergeado em c3e85bd) + checkpoint b9864088 publicado
+- [x] Handshake com a Ponte Neural SIAOL testado ao vivo (GET + POST com Bearer)
+
+## Fase 16: Compartilhamento de Missões (exportar/importar)
+- [x] Backend: endpoints missions.exportMission (código base64url com input/título/resultado/confiança, payload versionado app=nexus v1) e missions.importMission (validação + cria missão do usuário, limite 5000 chars)
+- [x] Frontend: botão Exportar nos cartões de missão da Minha IA (copia código p/ área de transferência) + botão Importar na barra de criação (dialog com textarea)
+- [x] Vitest coverage (export + import com validação de payload) — 110 testes, 108 passando (2 por cota externa 412) + checkpoint + GitHub sync

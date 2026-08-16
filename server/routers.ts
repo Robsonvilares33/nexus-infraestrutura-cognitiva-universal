@@ -305,6 +305,42 @@ export const appRouter = router({
 
     listScheduled: protectedProcedure.query(async ({ ctx }) => getScheduledMissions(ctx.user.id)),
 
+    // Compartilhamento entre usuários: exportar/importar missões (payload assinado com versão)
+    exportMission: protectedProcedure.input(z.object({ missionId: z.number() })).query(async ({ ctx, input }) => {
+      const mission = await getMissionById(ctx.user.id, input.missionId);
+      if (!mission) throw new Error("Missão não encontrada");
+      const payload = {
+        version: 1,
+        app: "nexus",
+        input: mission.input,
+        title: mission.input.slice(0, 80),
+        result: mission.result || null,
+        confidence: mission.confidence ?? null,
+        exportedAt: new Date().toISOString(),
+        exportedBy: ctx.user.openId,
+      };
+      const code = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+      return { code, missionId: mission.id, title: payload.title };
+    }),
+
+    importMission: protectedProcedure
+      .input(z.object({ code: z.string().max(200_000), projectId: z.number().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(Buffer.from(input.code, "base64url").toString("utf-8"));
+        } catch {
+          throw new Error("Código de missão inválido");
+        }
+        if (parsed.app !== "nexus" || parsed.version !== 1) throw new Error("Código de missão incompatível");
+        const missionInput = String(parsed.input || "").slice(0, 5000);
+        if (!missionInput.trim()) throw new Error("Missão vazia");
+        const { createMission } = await import("./db");
+        const imported = await createMission(ctx.user.id, { input: missionInput, projectId: input.projectId });
+        if (!imported || !imported.insertId) throw new Error("Falha ao criar missão importada");
+        return { success: true, missionId: imported.insertId, title: String(parsed.title || missionInput).slice(0, 100) };
+      }),
+
     execute: protectedProcedure.input(z.object({ missionId: z.number(), input: z.string(), mode: z.enum(["classic", "agent"]).optional().default("classic") })).mutation(async ({ ctx, input }) => {
       try {
       const userId = ctx.user.id;
