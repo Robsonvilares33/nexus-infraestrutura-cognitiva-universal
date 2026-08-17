@@ -297,7 +297,7 @@
 - [x] Frontend: configuração de alerta de acumulado (painel com badges de limiar, dialog com Input, remover)
 - [x] Vitest coverage da Fase 23 (26/26 em nexus-loterias.test.ts: conferência, parseBRL, avaliação de alertas, isLotteryRelated, contexto do chat)
 - [x] README.md com seção Fase 23 (tabela de capacidades + aviso estatístico + testes)
-- [ ] Checkpoint + sincronização com o GitHub (Management UI: Settings → GitHub / card "Sincronizar esta prévia")
+- [x] Checkpoint salvo (acf40fc3, auto-published em nexuscogni-bvvqkune.manus.space); sincronização GitHub orientada via Management UI (Settings → GitHub / card "Sincronizar esta prévia"), pois o git push direto é bloqueado pelo GH013 (Push Protection — remote aceita apenas commits verificados)
 
 ### Progresso Fase 23 (contexto de retomada)
 Feito até agora: Migration 0020 aplicada (tabela lotteryBets + lotteryAlerts no DB); schema.ts com lotteryBets (userId, lotteryType, drawNumber, numbers json, hits, checked) e lotteryAlerts (userId, lotteryType, thresholdBRL, enabled, lastNotifiedDraw); db.ts com helpers: insertLotteryBet, listLotteryBets, updateLotteryBet, listPendingBets, upsertLotteryAlert, listLotteryAlerts, updateLotteryAlert, deleteLotteryAlert (falta criar este último no db.ts); nexus-loterias.ts com checkBetHits, parseBRL, evaluateAccumulatedAlert; router loterias.ts com latestDraw, saveBet, listBets (auto-confere), getAlerts, setAlert, removeAlert (protectedProcedure).
