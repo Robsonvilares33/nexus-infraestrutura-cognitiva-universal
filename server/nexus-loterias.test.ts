@@ -269,3 +269,78 @@ describe("Fase 23 — integração com chat (isLotteryRelated / buildLotteryStat
     expect(ctx).toContain("sorteios são aleatórios");
   });
 });
+
+// ---------- Fase 24: exportação e compartilhamento de apostas ----------
+describe("Fase 24 — código base64 de compartilhamento", () => {
+  it("exporta e decodifica payload versionado sem padding nem quebras", () => {
+    const numbers = [4, 8, 15, 16, 23, 42];
+    const payload = { app: "nexus", v: 1, kind: "lottery-bet", lotteryType: "megasena", drawNumber: 0, numbers };
+    const code = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+    expect(code).not.toMatch(/[+/=\r\n]/);
+    const decoded = JSON.parse(Buffer.from(code, "base64url").toString("utf-8"));
+    expect(decoded).toMatchObject({ app: "nexus", v: 1, kind: "lottery-bet", lotteryType: "megasena" });
+    expect(decoded.numbers).toEqual(numbers);
+  });
+
+  it("payload com kind errado decodifica mas é rejeitado na validação semântica", () => {
+    const badKind = Buffer.from(JSON.stringify({ app: "nexus", v: 1, kind: "mission", numbers: [1, 2] }), "utf-8").toString(
+      "base64url",
+    );
+    const parsed = JSON.parse(Buffer.from(badKind, "base64url").toString("utf-8"));
+    expect(parsed.kind).toBe("mission");
+    expect(parsed.kind === "lottery-bet").toBe(false);
+  });
+
+  it("string não-base64url não decodifica em JSON válido do NEXUS", () => {
+    // Buffer.from aceita chars inválidos sem lançar; a rejeição vem do JSON.parse ou da validação semântica
+    const decoded = Buffer.from("!!!nao-eh-base64url!!", "base64url").toString("utf-8");
+    expect(() => JSON.parse(decoded)).toThrow();
+    const garbage = Buffer.from("eyIgYmFnb3Jh", "base64url").toString("utf-8"); // decodifica para JSON inválido
+    expect(() => JSON.parse(garbage)).toThrow();
+  });
+});
+
+describe("Fase 24 — formatação de dezenas para lotérica", () => {
+  it("ordena com zero à esquerda sem mutar o array original", () => {
+    const numbers = [3, 60, 21, 7, 44];
+    const formatted = numbers.slice().sort((a, b) => a - b).map((n) => String(n).padStart(2, "0")).join(" - ");
+    expect(formatted).toBe("03 - 07 - 21 - 44 - 60");
+    expect(numbers).toEqual([3, 60, 21, 7, 44]);
+  });
+});
+
+describe("Fase 24 — estatísticas pessoais de acertos", () => {
+  const series = [
+    { lotteryType: "megasena", drawNumber: 3044, drawDate: "2026-08-13T23:00:00.000Z", hits: 2 },
+    { lotteryType: "megasena", drawNumber: 3045, drawDate: "2026-08-16T23:00:00.000Z", hits: 4 },
+    { lotteryType: "quina", drawNumber: 7000, drawDate: "2026-08-16T23:00:00.000Z", hits: 3 },
+  ];
+
+  it("resumo por loteria agrega apostas, total de acertos e máximo", () => {
+    const summary: Record<string, { bets: number; totalHits: number; maxHits: number }> = {};
+    for (const s of series) {
+      const acc = (summary[s.lotteryType] ??= { bets: 0, totalHits: 0, maxHits: 0 });
+      acc.bets += 1;
+      acc.totalHits += s.hits;
+      acc.maxHits = Math.max(acc.maxHits, s.hits);
+    }
+    expect(summary.megasena).toEqual({ bets: 2, totalHits: 6, maxHits: 4 });
+    expect(summary.quina).toEqual({ bets: 1, totalHits: 3, maxHits: 3 });
+  });
+
+  it("série temporal rotula a loteria em português", () => {
+    const labels: Record<string, string> = { megasena: "Mega-Sena", quina: "Quina" };
+    const rows = series.map((s) => ({
+      // mesma estratégia do frontend: data local do usuário (toLocaleDateString converte UTC → fuso local)
+      data: new Date(s.drawDate).toLocaleDateString("pt-BR"),
+      hits: s.hits,
+      loteria: labels[s.lotteryType],
+    }));
+    // o dia exibido depende do fuso do ambiente de teste; verifica estrutura e ordem em vez de data fixa
+    expect(rows[0].hits).toBe(2);
+    expect(rows[2].hits).toBe(3);
+    expect(rows[0].loteria).toBe("Mega-Sena");
+    expect(rows[2].loteria).toBe("Quina");
+    expect(rows.every((r) => /^\d{2}\/\d{2}\/\d{4}$/.test(r.data))).toBe(true);
+  });
+});

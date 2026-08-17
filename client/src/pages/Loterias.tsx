@@ -89,6 +89,53 @@ export default function Loterias() {
   const setAlertMutation = trpc.loterias.setAlert.useMutation();
   const removeAlertMutation = trpc.loterias.removeAlert.useMutation();
 
+  // ---------- Fase 24: estatísticas pessoais + exportação ----------
+  const { data: myStats } = trpc.loterias.betStats.useQuery(undefined, { enabled: !!user });
+  const exportBetMutation = trpc.loterias.exportBet.useMutation();
+
+  // Fase 24: importação de aposta compartilhada
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importCode, setImportCode] = useState("");
+  const importBetMutation = trpc.loterias.importBet.useMutation();
+
+  const handleImportBet = async () => {
+    const code = importCode.trim();
+    if (!code) {
+      toast.error("Cole o código de compartilhamento da aposta");
+      return;
+    }
+    try {
+      const res = await importBetMutation.mutateAsync({ code });
+      toast.success(`Aposta importada para ${LOTTERY_LABELS[res.type as LotteryType]}! Ela será conferida automaticamente.`);
+      setImportCode("");
+      setImportDialogOpen(false);
+      await utils.loterias.listBets.invalidate();
+      await utils.loterias.betStats.invalidate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao importar a aposta");
+    }
+  };
+
+  const handleCopyNumbers = async (numbers: number[]) => {
+    const text = `Loteria: ${LOTTERY_LABELS[lottery]}\nDezenas: ${numbers.slice().sort((a, b) => a - b).join(" - ")}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Dezenas copiadas em formato de lotérica!");
+    } catch {
+      toast.error("Não foi possível copiar — seu navegador bloqueou o acesso à área de transferência.");
+    }
+  };
+
+  const handleShareBet = async (numbers: number[]) => {
+    try {
+      const res = await exportBetMutation.mutateAsync({ type: lottery, drawNumber: 0, numbers });
+      await navigator.clipboard.writeText(res.code);
+      toast.success("Código de compartilhamento copiado! Envie ao amigo que poderá importar em /loterias.");
+    } catch {
+      toast.error("Falha ao gerar o código de compartilhamento");
+    }
+  };
+
   const isCollecting = collectStatus === "running";
   const hasData = !!stats && stats.totalDraws > 0;
 
@@ -176,6 +223,17 @@ export default function Loterias() {
         : [],
     [stats],
   );
+
+  // Fase 24: série temporal de acertos pessoais (gráfica de evolução por loteria)
+  const myStatsSeries = useMemo(() => {
+    if (!myStats || myStats.series.length === 0) return [];
+    return myStats.series.map((s) => ({
+      data: s.drawDate ? new Date(s.drawDate).toLocaleDateString("pt-BR") : `Conc. ${s.drawNumber}`,
+      hits: s.hits,
+      loteria: LOTTERY_LABELS[s.lotteryType as LotteryType] ?? s.lotteryType,
+      concurso: s.drawNumber,
+    }));
+  }, [myStats]);
 
   const lastDrawsData = useMemo(
     () =>
@@ -480,6 +538,14 @@ export default function Loterias() {
               >
                 Configurar alerta
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#c9b8ff]/40 text-[#c9b8ff] hover:bg-[#c9b8ff]/10"
+                onClick={() => setImportDialogOpen(true)}
+              >
+                Importar aposta
+              </Button>
             </CardContent>
           </Card>
 
@@ -522,9 +588,71 @@ export default function Loterias() {
                       ) : (
                         <Badge variant="outline" className="border-white/20 text-white/50">Aguardando conferência</Badge>
                       )}
+                      <div className="flex gap-1.5 ml-auto">
+                        <button
+                          onClick={() => void handleCopyNumbers(b.numbers as number[])}
+                          className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-mono text-white/60 hover:text-[#7cf3ff] hover:border-[#7cf3ff]/40 transition-colors"
+                          title="Copiar dezenas em formato de lotérica"
+                        >
+                          Copiar dezenas
+                        </button>
+                        <button
+                          onClick={() => void handleShareBet(b.numbers as number[])}
+                          className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-mono text-white/60 hover:text-[#7cf3ff] hover:border-[#7cf3ff]/40 transition-colors"
+                          title="Gerar código base64 para compartilhar"
+                        >
+                          Compartilhar
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Meus acertos — evolução pessoal (Fase 24) */}
+          <Card className="bg-[#0a0d1a] border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white text-lg flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-[#c9b8ff]" /> Meus acertos
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Evolução dos acertos nas apostas salvas, conferidas contra os resultados oficiais da Caixa.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {myStats?.series.length ? (
+                <div className="grid lg:grid-cols-4 gap-4">
+                  <ResponsiveContainer width="100%" height={260} className="lg:col-span-3">
+                    <LineChart data={myStatsSeries} margin={{ top: 5, right: 15, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                      <XAxis dataKey="data" stroke="rgba(255,255,255,0.4)" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                      <YAxis stroke="rgba(255,255,255,0.4)" tick={{ fontSize: 10 }} width={26} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ background: "#0a0d1a", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#fff" }}
+                        labelFormatter={(_l, payload) => (payload?.[0] ? `${payload[0].payload.loteria} — concurso ${payload[0].payload.concurso}` : String(_l))}
+                      />
+                      <Legend />
+                      <Line type="monotone" dataKey="hits" stroke={NEXUS_PURPLE} strokeWidth={2} dot={{ r: 3 }} name="Acertos" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div className="space-y-2">
+                    {myStats.summary &&
+                      Object.entries(myStats.summary).map(([type, s]) => (
+                        <div key={type} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs">
+                          <div className="font-mono text-white/80">{LOTTERY_LABELS[type as LotteryType] ?? type}</div>
+                          <div className="text-white/50">
+                            {s.bets} apostas · {s.totalHits} acertos · máx. {s.maxHits}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-white/50">
+                  Ainda não há apostas conferidas. Salve apostas nesta página e acompanhe sua evolução aqui após cada conferência.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -594,16 +722,64 @@ export default function Loterias() {
                     </span>
                   ))}
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto border-[#7cff9f]/40 text-[#7cff9f] hover:bg-[#7cff9f]/10"
-                  onClick={() => handleSaveBet(bet)}
-                >
-                  Salvar aposta
-                </Button>
+                <div className="flex gap-1.5 ml-auto">
+                  <button
+                    onClick={() => void handleCopyNumbers(bet)}
+                    className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-mono text-white/60 hover:text-[#7cf3ff] hover:border-[#7cf3ff]/40 transition-colors"
+                    title="Copiar dezenas em formato de lotérica"
+                  >
+                    Copiar dezenas
+                  </button>
+                  <button
+                    onClick={() => void handleShareBet(bet)}
+                    className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-mono text-white/60 hover:text-[#7cf3ff] hover:border-[#7cf3ff]/40 transition-colors"
+                    title="Gerar código base64 para compartilhar"
+                  >
+                    Compartilhar
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-[#7cff9f]/40 text-[#7cff9f] hover:bg-[#7cff9f]/10"
+                    onClick={() => void handleSaveBet(bet)}
+                  >
+                    Salvar aposta
+                  </Button>
+                </div>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de importação de aposta compartilhada (Fase 24) */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="bg-[#0a0d1a] border-white/10 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">Importar aposta compartilhada</DialogTitle>
+            <DialogDescription className="text-white/50">
+              Cole o código gerado por outro usuário do NEXUS. A aposta será salva e conferida automaticamente quando o concurso sair.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="import-code" className="text-white/70">
+                Código de compartilhamento (base64)
+              </Label>
+              <Input
+                id="import-code"
+                className="bg-white/5 border-white/15 text-white font-mono"
+                placeholder="NxUe..."
+                value={importCode}
+                onChange={(e) => setImportCode(e.target.value)}
+              />
+            </div>
+            <Button
+              className="bg-[#c9b8ff]/15 text-[#c9b8ff] border border-[#c9b8ff]/40 hover:bg-[#c9b8ff]/25 w-full"
+              onClick={handleImportBet}
+            >
+              Importar aposta
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

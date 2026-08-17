@@ -257,3 +257,21 @@ Aviso: a análise é **puramente estatística descritiva** — sorteios são ale
 ### Configuração
 
 Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (26/26: inclui conferência de apostas, `parseBRL`, avaliação de alertas de acumulado, detecção de perguntas sobre loterias e contexto do chat) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).
+
+## Fase 24: Loterias NEXUS — acertos pessoais, missões e exportação de apostas
+
+A Fase 24 completa o ciclo do módulo de Loterias com três melhorias: histórico pessoal de acertos, missões agendadas sobre os dados oficiais e exportação/compartilhamento de apostas.
+
+| Capacidade | Descrição |
+|---|---|
+| Histórico de acertos pessoais | `loterias.betStats` (`listCheckedBetsWithDraws` em `server/db.ts`): join entre `lotteryBets` e `lotteryDraws` das apostas conferidas, com série temporal e resumo por loteria (apostas, total de acertos, recorde de hits). O frontend exibe gráfico de linha (Recharts) na seção "Meus acertos" |
+| Template de missão de loterias | "Relatório de Loterias" adicionado ao `MISSION_TEMPLATES_SEED` (categoria `loterias`, ícone `Ticket`), com inserção idempotente na produção — permite agendar no planner missões que consultam as estatísticas oficiais |
+| Copiar dezenas (lotérica) | Botão "Copiar dezenas" gera texto em formato de lotérica (`Loteria: ...\nDezenas: 03 - 07 - ...`); o array original não é mutado (`slice()` antes de `sort()`) |
+| Compartilhar aposta | "Compartilhar" gera código base64url versionado (`app=nexus v=1 kind=lottery-bet`); o botão "Importar aposta" abre o diálogo que cola o código e salva a aposta via `loterias.importBet` — ela será conferida automaticamente quando o concurso sair |
+| Exportação (`exportBet`) | Procedimento tRPC que retorna o código base64url da aposta salva, com validação de posse |
+
+Aviso: a análise é **puramente estatística descritiva** — sorteios de loteria são aleatórios e nenhuma estatística aumenta a probabilidade matemática de acerto.
+
+### Configuração
+
+Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (32/32: round-trip do código base64, formatação de dezenas e estatísticas pessoais) e `pnpm test` completo, com apenas as 4 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).

@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listLotteryAlerts, listLotteryBets, listLotteryDraws, updateLotteryBet, upsertLotteryAlert } from "../db";
+import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, updateLotteryBet, upsertLotteryAlert } from "../db";
 import {
   COLLECT_LIMITS,
   LOTTERY_LABELS,
@@ -194,13 +194,86 @@ export const loteriasRouter = router({
       await deleteLotteryAlert(ctx.user.id, input.type);
       return { removed: true };
     }),
+
+  // ---------- Fase 24: estatísticas pessoais, exportação e compartilhamento ----------
+
+  // Série temporal de acertos (para gráfico de evolução pessoal)
+  betStats: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await listCheckedBetsWithDraws(ctx.user.id);
+    const series = rows.map((r) => ({
+      lotteryType: r.lotteryType,
+      drawNumber: r.drawNumber,
+      drawDate: r.drawDate ? new Date(r.drawDate).toISOString() : null,
+      hits: r.hits ?? 0,
+      numbers: r.numbers as number[],
+      checkedAt: r.createdAt?.toISOString() ?? null,
+    }));
+    // resumo por loteria
+    const summary: Record<string, { bets: number; totalHits: number; maxHits: number }> = {};
+    for (const s of series) {
+      const acc = (summary[s.lotteryType] ??= { bets: 0, totalHits: 0, maxHits: 0 });
+      acc.bets += 1;
+      acc.totalHits += s.hits;
+      acc.maxHits = Math.max(acc.maxHits, s.hits);
+    }
+    return { series, summary };
+  }),
+
+  // Exportar aposta em código base64url versionado (compartilhamento)
+  exportBet: protectedProcedure
+    .input(z.object({
+      type: z.enum(LOTTERY_TYPES),
+      drawNumber: z.number().int().min(0),
+      numbers: z.array(z.number().int().min(1).max(100)),
+    }))
+    .mutation(async ({ input }) => {
+      if (!validateNumbers(input.type as LotteryType, input.numbers)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Dezenas inválidas para esta loteria." });
+      }
+      const code = Buffer.from(
+        JSON.stringify({ app: "nexus", v: 1, kind: "lottery-bet", lotteryType: input.type, drawNumber: input.drawNumber, numbers: input.numbers }),
+        "utf-8",
+      ).toString("base64url");
+      return { code, disclaimer: "Código estatístico apenas — sorteios são aleatórios e não há garantia de acerto." };
+    }),
+
+  // Importar aposta compartilhada
+  importBet: protectedProcedure
+    .input(z.object({ code: z.string().min(1).max(1000) }))
+    .mutation(async ({ input, ctx }) => {
+      let parsed: { app?: string; v?: number; kind?: string; lotteryType?: string; drawNumber?: number; numbers?: unknown };
+      try {
+        parsed = JSON.parse(Buffer.from(input.code, "base64url").toString("utf-8"));
+      } catch {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Código de aposta inválido." });
+      }
+      if (parsed.app !== "nexus" || parsed.kind !== "lottery-bet" || !parsed.lotteryType || !Array.isArray(parsed.numbers)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Código não é uma aposta válida do NEXUS." });
+      }
+      const type = LOTTERY_TYPES.find((t) => t === parsed.lotteryType);
+      if (!type) throw new TRPCError({ code: "BAD_REQUEST", message: "Loteria não suportada no código." });
+      if (!validateNumbers(type, parsed.numbers)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Dezenas inválidas para a loteria do código." });
+      }
+      const drawNumber = Number(parsed.drawNumber) >= 0 ? Number(parsed.drawNumber) : 0;
+      await insertLotteryBet({
+        userId: ctx.user.id,
+        lotteryType: type,
+        drawNumber,
+        numbers: parsed.numbers as number[],
+        hits: null,
+        checked: 0,
+      });
+      return { saved: true, type, drawNumber };
+    }),
 });
 
 function parseAlertThreshold(v: string): number | null {
   const cleaned = v.replace(/[^0-9.,]/g, "").replace(/\./g, "").replace(",", ".");
   const n = parseFloat(cleaned);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return n;
+    return n;
 }
 
 export type LoteriasRouter = typeof loteriasRouter;
+

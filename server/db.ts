@@ -1663,13 +1663,29 @@ const MISSION_TEMPLATES_SEED = [
     category: "automação",
     icon: "Activity",
   },
+  {
+    title: "Relatório de Loterias",
+    description: "Análise estatística semanal dos resultados oficiais da Caixa (Mega-Sena, Quina, Lotofácil, Lotomania e Timemania) com dezenas quentes, frias, atraso e pares comuns.",
+    suggestedInput: "Gere um relatório semanal das loterias brasileiras: para Mega-Sena, Quina e Lotofácil, liste os 10 concursos mais recentes, as 10 dezenas mais quentes e frias de cada uma, os pares mais comuns e o status de acumulação atual.",
+    agents: "Pesquisa,Síntese,Memória",
+    category: "loterias",
+    icon: "Ticket",
+  },
 ] as const;
 
 export async function seedMissionTemplates() {
   const db = await getDb();
   if (!db) return 0;
   const existing = await db.$count(missionTemplates);
-  if (existing > 0) return existing;
+  if (existing > 0) {
+    // Fase 24: garante que o template de loterias existe mesmo após o seed inicial (idempotente)
+    const lotteryTpl = await db.select().from(missionTemplates).where(eq(missionTemplates.category, "loterias")).limit(1);
+    if (lotteryTpl.length === 0) {
+      const t = MISSION_TEMPLATES_SEED[MISSION_TEMPLATES_SEED.length - 1];
+      await createMissionTemplate({ ...t });
+    }
+    return existing;
+  }
   for (const t of MISSION_TEMPLATES_SEED) {
     await createMissionTemplate({ ...t });
   }
@@ -1950,4 +1966,42 @@ export async function deleteLotteryAlert(userId: number, lotteryType: string): P
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível");
   await db.delete(lotteryAlerts).where(and(eq(lotteryAlerts.userId, userId), eq(lotteryAlerts.lotteryType, lotteryType))).execute();
+}
+
+// ---------- Fase 24: estatísticas pessoais de acertos (série temporal) ----------
+
+export type LotteryBetStatsRow = {
+  id: number;
+  lotteryType: string;
+  drawNumber: number;
+  drawDate: string | null;
+  numbers: unknown;
+  hits: number | null;
+  checked: number;
+  createdAt: Date | null;
+};
+
+export async function listCheckedBetsWithDraws(userId: number): Promise<LotteryBetStatsRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryBets.id,
+      lotteryType: lotteryBets.lotteryType,
+      drawNumber: lotteryBets.drawNumber,
+      drawDate: lotteryDraws.drawDate,
+      numbers: lotteryBets.numbers,
+      hits: lotteryBets.hits,
+      checked: lotteryBets.checked,
+      createdAt: lotteryBets.createdAt,
+    })
+    .from(lotteryBets)
+    .leftJoin(
+      lotteryDraws,
+      and(eq(lotteryDraws.lotteryType, lotteryBets.lotteryType), eq(lotteryDraws.drawNumber, lotteryBets.drawNumber)),
+    )
+    .where(eq(lotteryBets.userId, userId))
+    .orderBy(desc(lotteryDraws.drawNumber), desc(lotteryBets.id))
+    .limit(500);
+  return rows.filter((r) => r.checked === 1) as LotteryBetStatsRow[];
 }
