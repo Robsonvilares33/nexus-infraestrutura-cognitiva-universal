@@ -764,3 +764,87 @@ export function getCachedLstmWeights(type: LotteryType): LstmWeights | null {
   const cached = lstmTrainingState.get(type);
   return cached?.weights ?? null;
 }
+
+// ---------- Fase 26: backtest por método ----------
+
+/**
+ * Backtest: para cada concurso (a partir do 12º, para haver histórico),
+ * regenera a aposta com cada método usando apenas concursos ANTERIORES e
+ * compara com o resultado real.
+ *
+ * Métodos avaliados:
+ * - `lstm`: previsões do mini-LSTM (quando há pesos disponíveis)
+ * - `blend`: mistura 50/50 LSTM + estatístico
+ * - `estatistico`: frequência quente + atraso + aleatório (mesmo gerador da Fase 22)
+ * - `aleatorio`: linha de base puramente aleatória
+ */
+export function backtestByMethod(
+  type: LotteryType,
+  draws: LotteryDraw[],
+  weights: LstmWeights | null,
+  opts: { limit?: number; seed?: number } = {},
+): {
+  methods: Record<string, { totalHits: number; contests: number; avgHits: number }>;
+  contests: number;
+  disclaimer: string;
+} {
+  const sorted = [...draws].sort((a, b) => a.drawNumber - b.drawNumber);
+  const minHistory = 12;
+  const rows = opts.limit ? sorted.slice(-opts.limit) : sorted;
+  const evalRows = rows.slice(minHistory);
+  const toNumbers = (n: unknown): number[] => (Array.isArray(n) ? (n.filter((v) => typeof v === "number") as number[]) : []);
+
+  const methods: Record<string, { totalHits: number; contests: number }> = {
+    lstm: { totalHits: 0, contests: 0 },
+    blend: { totalHits: 0, contests: 0 },
+    estatistico: { totalHits: 0, contests: 0 },
+    aleatorio: { totalHits: 0, contests: 0 },
+  };
+
+  const random = mulberry32ForStats(opts.seed ?? 20260816);
+  for (let i = minHistory; i < rows.length; i++) {
+    const history = rows.slice(0, i).map((d) => toNumbers(d.numbers));
+    const truth = rows[i];
+    const truthNumbers = toNumbers(truth.numbers);
+    const seed = rows[i].drawNumber;
+    const stats = computeStats(type, rows.slice(0, i));
+    const statBet = generateStatisticalBet(type, stats, seed);
+
+    let lstmBet: number[] | null = null;
+    if (weights) {
+      try {
+        lstmBet = lstmPredict(weights, history).numbers;
+      } catch {
+        lstmBet = null;
+      }
+    }
+    const rnd = Array.from({ length: LOTTERY_DRAW_SIZE[type] }, () => Math.floor(random() * LOTTERY_MAX_NUMBER[type]) + 1);
+    const uniqueRnd = Array.from(new Set(rnd));
+    const randomBet =
+      uniqueRnd.length >= LOTTERY_DRAW_SIZE[type]
+        ? uniqueRnd.slice(0, LOTTERY_DRAW_SIZE[type]).sort((a, b) => a - b)
+        : statBet; // fallback se não houver dezenas únicas suficientes
+
+    const lstmHits = lstmBet ? checkBetHits(lstmBet, truthNumbers) ?? 0 : 0;
+    const statHits = checkBetHits(statBet, truthNumbers) ?? 0;
+    methods.lstm.contests += lstmBet ? 1 : 0;
+    methods.lstm.totalHits += lstmHits;
+    methods.blend.contests += 1;
+    methods.blend.totalHits += checkBetHits(lstmBet ? blendWithStats(lstmBet, statBet, 0.5) : statBet, truthNumbers) ?? 0;
+    methods.estatistico.contests += 1;
+    methods.estatistico.totalHits += statHits;
+    methods.aleatorio.contests += 1;
+    methods.aleatorio.totalHits += checkBetHits(randomBet, truthNumbers) ?? 0;
+  }
+
+  const out: Record<string, { totalHits: number; contests: number; avgHits: number }> = {};
+  for (const [k, v] of Object.entries(methods)) {
+    out[k] = { ...v, avgHits: v.contests > 0 ? v.totalHits / v.contests : 0 };
+  }
+
+  return {
+    methods: out,
+    contests: evalRows.length,
+    disclaimer: "Backtest histórico apenas — sorteios são aleatórios; a taxa de acertos passada não prevê resultados futuros.",
+  };
+}

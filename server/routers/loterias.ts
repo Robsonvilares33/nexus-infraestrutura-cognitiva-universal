@@ -2,11 +2,52 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs } from "../db";
-import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, lstmPredict, mulberry32ForStats, startLstmTraining, type LstmWeights, validateNumbers } from "../nexus-loterias";
+import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, startLstmTraining, type LstmWeights, validateNumbers } from "../nexus-loterias";
 import { storageGet, storagePut } from "../storage";
 
 // Coleção em andamento (uma coleta por processo, simples)
 let collecting: Promise<{ type: string; latest: number | null; collected: number; skipped: number; errors: number }> | null = null;
+
+/**
+ * Fase 26: coleta histórica automática. Se não houver nenhum job de coleta
+ * histórica concluído para a(s) loteria(s) em questão, cria um job e o
+ * executa em background (mesma rotina do collectHistory).
+ */
+async function ensureAutoHistoryCollection(types: LotteryType[]): Promise<{ type: string; latest: number | null; collected: number; skipped: number; errors: number }> {
+  const noop = { type: "history", latest: null as number | null, collected: 0, skipped: 0, errors: 0 };
+  if (collecting) return noop;
+  const jobs = await listLotteryCollectJobs();
+  const typesWithoutDone = types.filter((t) => !jobs.some((j) => j.lotteryType === t && (j.status === "done" || j.status === "running")));
+  if (typesWithoutDone.length === 0) return noop;
+  const jobIds: Record<string, number> = {};
+  for (const t of typesWithoutDone) jobIds[t] = await createLotteryCollectJob(t, COLLECT_LIMITS[t]);
+  collecting = (async () => {
+    try {
+      for (const t of typesWithoutDone) {
+        const limit = COLLECT_LIMITS[t];
+        await setLotteryCollectJobStatus(jobIds[t], { totalDraws: limit });
+        await collectAndPersist(t, limit, async (draw) => {
+          await insertLotteryDraw({
+            lotteryType: t,
+            drawNumber: draw.drawNumber,
+            drawDate: draw.drawDate,
+            numbers: draw.numbers,
+            accumulatedPrize: draw.accumulatedPrize,
+            estimatedNextPrize: draw.estimatedNextPrize,
+            winners: draw.winners,
+          }).catch(() => {});
+          return 1;
+        });
+        await setLotteryCollectJobStatus(jobIds[t], { status: "done", collectedDraws: limit });
+      }
+    } catch (err) {
+      for (const t of typesWithoutDone) await setLotteryCollectJobStatus(jobIds[t], { status: "failed", error: String(err) }).catch(() => {});
+    } finally {
+      collecting = null;
+    }
+  })().then(() => ({ type: "history", latest: null, collected: 0, skipped: 0, errors: 0 }));
+  return collecting;
+}
 
 export const loteriasRouter = router({
   // Lista de loterias suportadas
@@ -58,6 +99,8 @@ export const loteriasRouter = router({
             total.errors += res.errors;
             total.latest = res.latest;
           }
+          // Fase 26: inicia a coleta histórica completa automaticamente se ainda não houver job completo
+          void ensureAutoHistoryCollection(types).catch(() => {});
         } finally {
           collecting = null;
         }
@@ -253,6 +296,38 @@ export const loteriasRouter = router({
 
   // Modelos treinados por loteria
   listModels: publicProcedure.query(() => listLotteryModels()),
+
+  // ---------- Fase 26: backtest por método ----------
+
+  // Backtest: taxa de acerto por método comparada ao histórico real coletado
+  backtest: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES), limit: z.number().int().min(12).max(2000).optional() }))
+    .query(async ({ input }) => {
+      const rows = await listLotteryDraws(input.type, 2000);
+      if (rows.length < 12) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Histórico insuficiente para o backtest de ${LOTTERY_LABELS[input.type]} (${rows.length} concursos; preciso de pelo menos 12).`,
+        });
+      }
+      let weights: LstmWeights | null = null;
+      const cached = getCachedLstmWeights(input.type);
+      if (cached) {
+        weights = cached;
+      } else {
+        const models = (await listLotteryModels(input.type)).filter((m) => m.status === "ready" && m.weightsKey);
+        if (models[0]) {
+          try {
+            const url = await storageGet(models[0].weightsKey as string);
+            const res = await fetch(url.url);
+            weights = ((await res.json()) as LstmWeights) ?? null;
+          } catch {
+            weights = null;
+          }
+        }
+      }
+      return backtestByMethod(input.type, rows, weights, { limit: input.limit });
+    }),
 
   // Previsão LSTM: combina o modelo treinado com o histórico real
   lstmBet: publicProcedure

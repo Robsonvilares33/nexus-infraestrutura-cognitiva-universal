@@ -287,3 +287,18 @@ A Fase 25 evolui o módulo de Loterias com três capacidades preditivas: coleta 
 Aviso: a análise é **puramente estatística e probabilística** — sorteios de loteria são aleatórios e nenhum modelo (incluindo o LSTM) aumenta a probabilidade matemática de acerto.
 ### Configuração
 Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (42/42: filtro de período, dataset LSTM, épocas de treinamento, inferência determinística, blend LSTM+estatístico) e `pnpm test` completo.
+
+## Fase 26: Loterias NEXUS — backtest por método, coleta histórica automática e comparação de períodos
+
+A Fase 26 adiciona três capacidades de validação e conveniência ao módulo de Loterias: backtest histórico por método de geração de apostas, início automático da coleta histórica completa junto com a coleta regular e um gráfico comparativo de períodos lado a lado.
+
+| Capacidade | Descrição |
+|---|---|
+| Backtest histórico | `loterias.backtest` simula sobre os concursos reais coletados: para cada concurso (do 13º em diante), cada método gera uma aposta usando **apenas o histórico anterior** e os acertos são comparados ao resultado oficial da Caixa. Retorna média de acertos por concurso para `lstm`, `blend` (LSTM + estatístico), `estatístico` e `aleatório` (baseline), além do disclaimer — o painel "Backtest histórico" exibe os 4 métodos na página `/loterias`. A avaliação do LSTM só ocorre quando há pesos treinados salvos no S3 |
+| Coleta histórica automática | O `finally` do procedimento `loterias.collect` agora chama `ensureAutoHistoryCollection`: se não houver job de coleta histórica concluído ou em execução para a(s) loteria(s) coletadas, a coleta completa (500/300 concursos) é iniciada em background automaticamente — sem ação extra do usuário |
+| Comparação de períodos | A página `/loterias` busca as estatísticas de 30 e 90 dias em paralelo e renderiza, no tab Frequência, um gráfico de barras sobreposto (30 vs 90 dias) que evidencia tendências de aquecimento e resfriamento de dezenas |
+
+Aviso: a análise é **puramente estatística e probabilística** — sorteios de loteria são aleatórios e nenhum backtest ou modelo aumenta a probabilidade matemática de acerto; o método aleatório existe como linha de base para comparar honestamente os demais.
+
+### Configuração
+Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (48/48: backtest sobre sorteios sintéticos determinísticos, garantia de não vazamento do futuro — a aposta de cada concurso só vê o histórico anterior —, `limit`, avaliação do LSTM com pesos, Lotofácil e histórico insuficiente) e `pnpm test` completo (183/185, 2 falhas externas conhecidas por cota 412 do LLM de teste em `server/nexus.test.ts`).

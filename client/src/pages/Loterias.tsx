@@ -80,6 +80,26 @@ export default function Loterias() {
   const { data: collectJobs } = trpc.loterias.listCollectJobs.useQuery(undefined, { refetchInterval: 5000 });
   const { data: lstmModels } = trpc.loterias.listModels.useQuery(undefined, { refetchInterval: 10000 });
   const { data: lstmPreds } = trpc.loterias.lstmBet.useQuery({ type: lottery, count: 1 }, { enabled: !!stats });
+
+  // ---------- Fase 26: backtest por método ----------
+  const { data: backtest, isLoading: backtestLoading } = trpc.loterias.backtest.useQuery(
+    { type: lottery },
+    { enabled: !!stats },
+  );
+
+  // Fase 26: comparação de períodos lado a lado (30 vs 90 dias)
+  const { data: stats30 } = trpc.loterias.stats.useQuery({ type: lottery, period: "30" }, { enabled: !!stats });
+  const { data: stats90 } = trpc.loterias.stats.useQuery({ type: lottery, period: "90" }, { enabled: !!stats });
+
+  const comparisonData = useMemo(() => {
+    const f30 = stats30?.frequency ?? [];
+    const f90 = stats90?.frequency ?? [];
+    if (f30.length === 0 || f90.length === 0) return [];
+    const by90 = new Map(f90.map((f) => [f.number, f.frequency]));
+    return [...f30]
+      .sort((a, b) => a.number - b.number)
+      .map((f) => ({ name: String(f.number), "30d": f.frequency, "90d": by90.get(f.number) ?? 0 }));
+  }, [stats30, stats90]);
   const collectHistoryMutation = trpc.loterias.collectHistory.useMutation();
   const trainModelMutation = trpc.loterias.trainModel.useMutation();
 
@@ -459,6 +479,55 @@ export default function Loterias() {
             </Card>
           )}
 
+          {/* Fase 26: painel de backtest por método */}
+          <Card className="bg-[#0a0d1a] border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-[#7cff9f]" /> Backtest histórico — {LOTTERY_LABELS[lottery]}
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                {backtest
+                  ? `Simulação sobre ${backtest.contests} concursos reais: para cada sorteio, cada método gerou uma aposta usando apenas o histórico anterior e foi comparado ao resultado oficial da Caixa.`
+                  : "A taxa de acerto passada é avaliada contra os concursos reais coletados. Requer histórico suficiente (mín. 12 concursos)."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {backtestLoading || !backtest ? (
+                <Skeleton className="h-24 bg-white/5" />
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {([
+                      { key: "lstm", label: "LSTM", accent: NEXUS_PURPLE },
+                      { key: "blend", label: "LSTM + estatístico", accent: NEXUS_CYAN },
+                      { key: "estatistico", label: "Estatístico", accent: NEXUS_GOLD },
+                      { key: "aleatorio", label: "Aleatório (baseline)", accent: "#ff6b6b" },
+                    ] as const).map(({ key, label, accent }) => {
+                      const m = backtest.methods[key];
+                      return (
+                        <div key={key} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-white/50">{label}</span>
+                            {key === "lstm" && !backtest.methods.lstm.contests && (
+                              <Badge variant="outline" className="border-[#ffd479]/40 text-[#ffd479] text-[10px]">sem modelo</Badge>
+                            )}
+                          </div>
+                          <div className="mt-1 font-mono text-lg font-bold" style={{ color: accent }}>
+                            {m.contests > 0 ? m.avgHits.toFixed(2) : "—"}
+                          </div>
+                          <div className="text-[10px] text-white/40">
+                            {m.contests > 0 ? `${m.totalHits} acertos em ${m.contests} concursos · média/concurso` : "não avaliado"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-[#ffd479]/80">{backtest.disclaimer}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Fase 25: painel de previsões LSTM */}
           <Card className="bg-[#0a0d1a] border-[#c9b8ff]/30">
             <CardHeader>
@@ -575,6 +644,35 @@ export default function Loterias() {
                         <Bar dataKey="freq" fill={NEXUS_CYAN} radius={[2, 2, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Fase 26: comparação de períodos lado a lado */}
+                <Card className="bg-[#0a0d1a] border-white/10">
+                  <CardHeader>
+                    <CardTitle className="text-white text-base">Comparação de períodos</CardTitle>
+                    <CardDescription className="text-white/50">
+                      Frequência por dezena nos últimos 30 vs 90 dias — tendências de aquecimento e resfriamento
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {comparisonData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart data={comparisonData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                          <XAxis dataKey="name" stroke="rgba(255,255,255,0.4)" tick={{ fontSize: 10 }} interval={2} />
+                          <YAxis stroke="rgba(255,255,255,0.4)" tick={{ fontSize: 10 }} width={30} />
+                          <Tooltip
+                            contentStyle={{ background: "#0a0d1a", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#fff" }}
+                          />
+                          <Legend />
+                          <Bar dataKey="30d" fill={NEXUS_PURPLE} name="30 dias" radius={[2, 2, 0, 0]} />
+                          <Bar dataKey="90d" fill={NEXUS_CYAN} name="90 dias" radius={[2, 2, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <p className="text-sm text-white/50">Só aparecerá quando houver sorteios suficientes nos últimos 90 dias.</p>
+                    )}
                   </CardContent>
                 </Card>
 

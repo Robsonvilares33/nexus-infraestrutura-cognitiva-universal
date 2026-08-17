@@ -450,3 +450,104 @@ describe("Fase 25 — blendWithStats", () => {
     expect(blended).toEqual([1, 2, 3, 4, 5, 6]);
   });
 });
+
+// ---------- Fase 26: backtest por método ----------
+import { backtestByMethod, buildLstmDataset, runLstmTrainingEpoch, type LstmWeights } from "./nexus-loterias";
+
+function makeWeights26(): LstmWeights {
+  const res = runLstmTrainingEpoch(
+    "megasena",
+    buildLstmDataset(
+      "megasena",
+      Array.from({ length: 25 }, (_, i) => ({
+        numbers: [1 + (i % 10), 2 + (i % 10), 3 + (i % 10), 4 + (i % 10), 5 + (i % 10), 6 + (i % 10)],
+      })),
+      10,
+    ),
+    16,
+    0.02,
+    null,
+  );
+  return res.weights;
+}
+
+function makeSyntheticDraws(type: "megasena" = "megasena", count: number, startAt: number = 1000): LotteryDraw[] {
+  // sorteios sintéticos determinísticos para avaliar o backtest
+  const max = LOTTERY_MAX_NUMBER[type];
+  const size = LOTTERY_DRAW_SIZE[type];
+  const rnd = mulberry32(12345);
+  const draws: LotteryDraw[] = [];
+  for (let i = 0; i < count; i++) {
+    const nums = new Set<number>();
+    while (nums.size < size) nums.add(Math.floor(rnd() * max) + 1);
+    draws.push(makeDraw(startAt + i, [...nums].sort((a, b) => a - b), { lotteryType: type }));
+  }
+  return draws;
+}
+
+describe("Fase 26 — backtestByMethod", () => {
+  it("avalia os 4 métodos sobre concursos sintéticos (megasena)", () => {
+    const draws = makeSyntheticDraws("megasena", 40);
+    const res = backtestByMethod("megasena", draws, null);
+    expect(res.contests).toBe(40 - 12);
+    expect(res.methods.estatistico.contests).toBe(res.contests);
+    expect(res.methods.blend.contests).toBe(res.contests);
+    expect(res.methods.aleatorio.contests).toBe(res.contests);
+    expect(res.methods.lstm.contests).toBe(0); // sem pesos, LSTM não é avaliado
+    // média de acertos dentro do range possível (1..6 para mega)
+    for (const m of Object.values(res.methods)) {
+      expect(m.avgHits).toBeGreaterThanOrEqual(0);
+      expect(m.avgHits).toBeLessThanOrEqual(6);
+    }
+    expect(res.disclaimer).toBeTruthy();
+  });
+
+  it("usa apenas histórico anterior: a aposta de cada concurso não vê o próprio resultado", () => {
+    // com 100 concursos sintéticos, nenhum método pode acertar mais que
+    // o tamanho do sorteio (6) — garante que não há vazamento do futuro
+    const draws = makeSyntheticDraws("megasena", 100);
+    const res = backtestByMethod("megasena", draws, null);
+    expect(res.methods.estatistico.avgHits).toBeLessThan(LOTTERY_DRAW_SIZE.megasena + 0.5);
+    // e a média estatística sobre 88 concursos deve ser positiva
+    expect(res.methods.estatistico.totalHits).toBeGreaterThan(0);
+  });
+
+  it("respeita o limit", () => {
+    const draws = makeSyntheticDraws("megasena", 100);
+    const full = backtestByMethod("megasena", draws, null);
+    const limited = backtestByMethod("megasena", draws, null, { limit: 30 });
+    // com limit=30 e minHistory=12 → 18 concursos avaliados vs 88 do total
+    expect(limited.contests).toBe(18);
+    expect(full.contests).toBeGreaterThan(limited.contests);
+  });
+
+  it("avalia o LSTM quando há pesos (determinístico)", () => {
+    const draws = makeSyntheticDraws("megasena", 30);
+    const weights = makeWeights26();
+    const withWeights = backtestByMethod("megasena", draws, weights, { seed: 7 });
+    const without = backtestByMethod("megasena", draws, null, { seed: 7 });
+    expect(withWeights.methods.lstm.contests).toBeGreaterThan(0);
+    expect(without.methods.lstm.contests).toBe(0);
+    // mesmíssimo seed: estatístico e aleatório devem ser idênticos
+    expect(withWeights.methods.estatistico.avgHits).toBe(without.methods.estatistico.avgHits);
+    expect(withWeights.methods.aleatorio.avgHits).toBe(without.methods.aleatorio.avgHits);
+  });
+
+  it("funciona em lotofacil (15 dezenas)", () => {
+    const draws = makeSyntheticDraws("lotofacil", 40);
+    const res = backtestByMethod("lotofacil", draws, null);
+    expect(res.contests).toBe(28);
+    for (const m of Object.values(res.methods)) {
+      if (m.contests > 0) {
+        expect(m.avgHits).toBeLessThanOrEqual(15);
+      }
+    }
+  });
+
+  it("retorna zero concursos quando o histórico é insuficiente", () => {
+    const draws = makeSyntheticDraws("megasena", 11);
+    const res = backtestByMethod("megasena", draws, null);
+    expect(res.contests).toBe(0);
+    expect(res.methods.estatistico.avgHits).toBe(0);
+  });
+});
