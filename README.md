@@ -302,3 +302,13 @@ Aviso: a análise é **puramente estatística e probabilística** — sorteios d
 
 ### Configuração
 Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (48/48: backtest sobre sorteios sintéticos determinísticos, garantia de não vazamento do futuro — a aposta de cada concurso só vê o histórico anterior —, `limit`, avaliação do LSTM com pesos, Lotofácil e histórico insuficiente) e `pnpm test` completo (183/185, 2 falhas externas conhecidas por cota 412 do LLM de teste em `server/nexus.test.ts`).
+
+## Fase 27: Loterias NEXUS — ranking de dezenas do backtest, backtest automático pós-treino e alerta de aquecimento
+
+A Fase 27 fecha o ciclo de validação do módulo de Loterias com três recursos de inteligência histórica:
+
+1. **Ranking de dezenas do backtest** (`backtestNumberRanking` + endpoint `loterias.numberRanking`): para cada concurso do histórico (mín. 12), cada método (LSTM, LSTM+estatístico, estatístico e aleatório) gera uma aposta usando apenas o passado e a taxa condicional de cada dezena (acertos ÷ vezes gerada) é acumulada. A "lista de confiança" combinada une as dezenas mais confiáveis de todos os métodos com pesos (LSTM/blend 1.0, estatístico 0.5, aleatório 0.2). Painel na página com abas por método.
+2. **Backtest automático pós-treino**: `trainLstmInBackground` preenche o cache do ranking automaticamente ao concluir o treinamento do modelo, sem ação extra do usuário.
+3. **Alerta de aquecimento** (`warmupAlerts` + endpoint `loterias.warmupAlerts`): detecta dezenas que são frias no passado anterior aos últimos 30 dias mas passaram a quentes nos últimos 30 dias, com fator delta de frequência proporcional. Badge no card de comparação de períodos e seção na página.
+
+`drawsWithinDays` agora aceita tanto o formato DD/MM/YYYY (dados reais da Caixa) quanto ISO (testes sintéticos). Suíte de testes: 193/195 no total (2 falhas externas conhecidas por cota LLM 412, sem relação com loterias); 56/56 no arquivo de loterias.

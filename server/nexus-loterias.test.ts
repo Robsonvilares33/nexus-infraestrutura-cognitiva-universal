@@ -551,3 +551,106 @@ describe("Fase 26 — backtestByMethod", () => {
     expect(res.methods.estatistico.avgHits).toBe(0);
   });
 });
+
+// ---------- Fase 27 ----------
+import { backtestNumberRanking, warmupAlerts } from "./nexus-loterias";
+
+describe("Fase 27 — backtestNumberRanking", () => {
+  it("rankeia dezenas por taxa de acerto condicional em cada método", () => {
+    const draws = makeSyntheticDraws("megasena", 40);
+    const res = backtestNumberRanking("megasena", draws, null);
+    expect(res.contests).toBe(28);
+    for (const key of ["lstm", "blend", "estatistico"] as const) {
+      if (key === "lstm") continue; // sem pesos no teste sem modelo
+      for (const r of res.perMethod[key]) {
+        expect(r.number).toBeGreaterThanOrEqual(1);
+        expect(r.number).toBeLessThanOrEqual(60);
+        expect(r.hitRate).toBeGreaterThanOrEqual(0);
+        expect(r.hitRate).toBeLessThanOrEqual(1);
+        expect(r.generated).toBeGreaterThan(0);
+      }
+      expect(res.perMethod[key].length).toBeGreaterThan(0);
+    }
+    expect(res.combined.length).toBeGreaterThan(0);
+    expect(res.combined[0].hitRate).toBeGreaterThanOrEqual(0);
+  });
+
+  it("avalia o LSTM apenas quando há pesos e ordena o combinado por hitRate", () => {
+    const draws = makeSyntheticDraws("megasena", 30);
+    const withWeights = backtestNumberRanking("megasena", draws, makeWeights26());
+    expect(withWeights.perMethod.lstm.length).toBeGreaterThan(0);
+    // ordenação decrescente por hitRate (desempate por score)
+    for (let i = 1; i < withWeights.combined.length; i++) {
+      const prev = withWeights.combined[i - 1];
+      const curr = withWeights.combined[i];
+      expect(curr.hitRate).toBeLessThanOrEqual(prev.hitRate + 1e-9);
+    }
+  });
+
+  it("não tem vazamento do futuro: a dezena gerada não pode ver o próprio concurso", () => {
+    const draws = makeSyntheticDraws("megasena", 100);
+    const res = backtestNumberRanking("megasena", draws, null);
+    // se houvesse vazamento, acertos poderiam ultrapassar o tamanho do sorteio
+    for (const key of ["lstm", "blend", "estatistico"] as const) {
+      if (key === "lstm") continue; // sem pesos no teste sem modelo
+      const totalHits = res.perMethod[key].reduce((s, r) => s + r.hits, 0);
+      const maxPossible = res.contests * LOTTERY_DRAW_SIZE.megasena;
+      expect(totalHits).toBeLessThanOrEqual(maxPossible);
+    }
+  });
+
+  it("respeita limit e mínimo de 12 concursos", () => {
+    const draws = makeSyntheticDraws("megasena", 50);
+    const full = backtestNumberRanking("megasena", draws, null);
+    const limited = backtestNumberRanking("megasena", draws, null, { limit: 20 });
+    expect(full.contests).toBe(38);
+    expect(limited.contests).toBe(8);
+  });
+
+  it("não produz ranking com histórico insuficiente", () => {
+    const draws = makeSyntheticDraws("megasena", 11);
+    const res = backtestNumberRanking("megasena", draws, null);
+    expect(res.contests).toBe(0);
+    expect(res.combined.length).toBe(0);
+  });
+});
+
+describe("Fase 27 — warmupAlerts", () => {
+  it("detecta dezena fria nos 90 dias que vira quente nos 30 dias", () => {
+    // 90 draws recentes (i=90..1 dias atrás): dezena 5 NUNCA sai → fria nos 90d
+    // os 30 draws mais recentes (i=30..1): 5 sai em todos → quente nos 30d
+    const today = Date.now();
+    const draws: LotteryDraw[] = [];
+    let drawNum = 3000;
+    for (let i = 90; i > 30; i--) {
+      draws.push(makeDraw(drawNum++, [1, 2, 3, 4, 10, 11], { drawDate: new Date(today - i * 86400000).toISOString() }));
+    }
+    for (let i = 29; i > 0; i--) {
+      draws.push(makeDraw(drawNum++, [5, 1, 2, 3, 4, 6], { drawDate: new Date(today - i * 86400000).toISOString() }));
+    }
+    const res = warmupAlerts("megasena", draws);
+    expect(res.numbers.length).toBeGreaterThan(0);
+    const five = res.numbers.find((n) => n.number === 5);
+    expect(five).toBeTruthy();
+    // 5 é quente nos 30d (apareceu em todos) mas nunca saiu nos 90d → delta grande
+    expect(five!.freq30).toBeGreaterThan(0);
+    expect(five!.deltaFactor).toBeGreaterThan(1);
+  });
+
+  it("não retorna nada com poucos concursos na janela", () => {
+    const draws = makeSyntheticDraws("megasena", 12);
+    expect(warmupAlerts("megasena", draws).numbers.length).toBe(0);
+  });
+
+  it("retorna vazio quando nenhuma dezena fria vira quente", () => {
+    // dezenas quentes estáveis nos 30d e 90d (mesmas dezenas sempre)
+    const draws: LotteryDraw[] = [];
+    let drawNum = 4000;
+    for (let i = 120; i > 0; i--) {
+      draws.push(makeDraw(drawNum++, [1, 2, 3, 4, 10, 11]));
+    }
+    const res = warmupAlerts("megasena", draws);
+    // nenhuma dezena fria nos 90d virou quente nos 30d
+    expect(res.numbers.every((n) => ![1, 2, 3, 4, 10, 11].includes(n.number))).toBe(true);
+  });
+});

@@ -359,3 +359,62 @@ Backend pronto: backtestByMethod + procedure backtest + ensureAutoHistoryCollect
 
 ### Progresso Fase 26 (contexto de retomada)
 Já implementado no backend: `backtestByMethod(type, draws, weights, {limit?, seed?})` em server/nexus-loterias.ts (avalia métodos lstm/blend/estatistico/aleatorio por concurso usando só histórico anterior, min 12 concursos; retorna methods.{totalHits,contests,avgHits}, contests, disclaimer). Router: procedimento `backtest` adicionado (usa getCachedLstmWeights + S3 via listLotteryModels ready/weightsKey); helper `ensureAutoHistoryCollection` criado no topo de routers/loterias.ts e chamado no finally do `collect` (cria jobs lotteryCollectJobs se não houver done/running). Falta: tsc ok (verificar), testes vitest Fase 26, painel Backtest no frontend Loterias.tsx (taxa acerto por método), gráfico comparativo 30 vs 90 dias (Recharts, 2 BarCharts lado a lado ou gráfico sobreposto), README Fase 26, checkpoint. Suíte anterior: 177/179 (2 falhas externas 412 cota LLM). Checkpoint Fase 25: 92d022fb publicado em nexuscogni-bvvqkune.manus.space.
+
+## Fase 27 (CONCLUÍDA — checkpoint): Loterias NEXUS — ranking de dezenas do backtest, backtest automático pós-treino e alerta de aquecimento
+
+- [x] Backend: backtest por dezena — acumular por dezena e método quantos sorteios a dezena estava na aposta gerada vs saiu no resultado real, retornando top dezenas por método (taxa de acerto condicional)
+- [x] Backend: `loterias.warmupAlerts` — dezenas frias (fora do top frio dos 90 dias) que entraram no top quente dos 30 dias, com delta de frequência
+- [x] Backend: backtest automático ao concluir o treinamento LSTM (job de treino grava status done → rotina roda backtest e atualiza/invalida cache; procedure backtest reusa)
+- [x] Frontend: painel "Top dezenas do backtest" na página /loterias com chips das dezenas mais confiáveis e destaque para a lista combinada
+- [x] Frontend: chip/destaque de alerta de aquecimento nas dezenas que viraram quentes (30 vs 90 dias)
+- [x] Vitest coverage da Fase 27 (56/56 no arquivo; suíte 193/195, 2 falhas externas 412) (ranking de dezenas, warmupAlerts determinístico)
+- [x] README.md e todo.md com seção Fase 27
+- [x] Checkpoint + sincronização com o GitHub (Management UI)
+### Progresso Fase 27 (contexto de retomada)
+Já implementado em server/nexus-loterias.ts:
+1. `backtestNumberRanking(type, draws, weights, {limit?, seed?, top?})` — retorna perMethod (lstm/blend/estatistico: number, hitRate, generated, hits, top 10) + combined (number, score ponderado [lstm/blend=1, estatistico=0.5, aleatorio=0.2], hitRate; top 20) + contests. Usa minHistory 12, sem vazamento do futuro.
+2. `warmupAlerts(type, draws)` — retorna numbers (número, freq30, freq90, deltaFactor = rate30/rate90) onde dezena está em cold90 (stats90.cold) E hot30 (stats30.hot); requer d30≥3 e d90≥10; sorted por deltaFactor desc.
+FALTA:
+1. Router: procedure `numberRanking` (usa getCachedLstmWeights + listLotteryDraws(type, limit ou 2000) + backtestNumberRanking); procedure `warmupAlerts` (listLotteryDraws + warmupAlerts). Importar em routers/loterias.ts.
+2. Backtest automático pós-treino: em trainLstmInBackground, após updateLotteryModel status "ready", rodar backtestNumberRanking/type (cache) — na verdade basta que getCachedLstmWeights retorne os pesos em memória (já faz via lstmTrainingState); o endpoint numberRanking já usa isso. Opcional: marcar em updateLotteryModel a coluna backtestAt? Manter simples: nada extra necessário — mas registrar lastBacktestAt na tabela lottery_models? Schema tabela lottery_models: id, lotteryType, status, epochs, finalLoss, weightsKey, lastDrawNumber, trainedAt. Não há backtestAt; pode adicionar Migration 0022 (coluna backtestAt TEXT null). DECISÃO: adicionar coluna backtestAt (text null) via migration 0022 + update no trainLstmInBackground após rodar backtest por dezena (roda backtestNumberRanking para popular memória).
+3. Frontend Loterias.tsx: painel "Top dezenas do backtest" (trpc.loterias.numberRanking.useQuery({type, period:"all"}) — precisa input limit no endpoint; usar listLotteryDraws(type, 2000)). Layout: tabs por método (lstm/blend/estatístico) com chips de dezena + hitRate% + uma seção "Lista de confiança combinada" com as top 10 do combined. Chip 🔥 de aquecimento nas dezenas hot do comparativo se warmupAlerts retornar (trpc.loterias.warmupAlerts.useQuery({type})).
+4. Alerta de aquecimento: badge âmbar no painel Comparação de períodos listando as dezenas aquecidas (freq30/freq90/deltaFactor).
+5. Testes Fase 27 em server/nexus-loterias.test.ts: backtestNumberRanking (perMethod hitRate 0..1, combined ordenado, sem vazamento) + warmupAlerts (determinístico, retorna vazio com poucos dados). Suíte anterior 183/185 (2 falhas externas 412 cota LLM).
+6. README seção Fase 27 (cat >> README.md), marcar [x] no todo, checkpoint + auto-publish (auto-publish ENABLED), entregar.
+
+### Progresso Fase 27 v2 (post-compaction)
+Backend FEITO: backtestNumberRanking + warmupAlerts + procedures numberRanking/warmupAlerts no router (tsc OK; curl validou: numberRanking 404 com <12 concursos esperado; warmupAlerts retorna []). Post-training hook adicionado em trainLstmInBackground (chama backtestNumberRanking após updateLotteryModel "ready").
+Frontend Loterias.tsx (1º bloco feito): queries numberRanking + warmupAlerts adicionadas; warmedNumbers Set memorizado; painel "Top dezenas do backtest" inserido após painel Backtest (cards combinada, Tabs combinada/lstm/blend/estatistico com componente RankingTable — AINDA FALTA definir RankingTable + importá-lo; usei showScore prop na tab combinada).
+FALTA no frontend:
+1. Definir componente RankingTable dentro de Loterias.tsx (props rows: {number, hitRate, score?, generated?, hits?}[], showScore?: boolean) — mini-tabela com dezenas em círculos coloridos, coluna taxa%, coluna acertos/geradas, coluna score opcional.
+2. Destaque de aquecimento na comparação de períodos: badge chama na seção Comparação de períodos quando warmedNumbers.size > 0 (texto: N dezenas frias nos 90d viraram quentes nos 30d).
+3. tsc check.
+Depois: testes Fase 27 (reusar makeDraw/makeWeights26/makeSyntheticDraws em nexus-loterias.test.ts; backtestNumberRanking perMethod/combinado/sem vazamento + warmupAlerts determinístico), pnpm test (esperar 183/185 + novos), README seção Fase 27 (cat >> README.md), marcar [x], checkpoint + auto-publish, entregar.
+Checkpoint Fase 26: 58e46c22. Domínio: nexuscogni-bvvqkune.manus.space. Suíte anterior: 183/185 (2 falhas externas 412 cota LLM).
+
+### Fase 27 debugging (encontrado e correto):
+1. backtestNumberRanking: map `aleatorio` faltava no stat → corrigido (inclui aleatorio).
+2. drawsWithinDays só parseava DD/MM/YYYY → agora aceita DD/MM/YYYY E ISO (tests passam a filtrar por data).
+3. warmupAlerts: w30/w90 fallback por drawNumber corrigido + w30 contido em w90 (w30Final).
+4. PROBLEMA REMANESCENTE no debug: warmup retorna numbers 7 e 8 com freq 0 e delta 0 — causa: stats30.hot contém números com freq 0 porque computeStats hot = top10 frequency, e dezenas com freq 0 ficam empatadas no topo quando poucos números aparecem (1,2,3,4,5,6,10,11 → 8 dezenas distintas). hot30 = 8 quentes + 2 zeros; cold90 também inclui zeros → números zero freq passam no filtro cold90 ∩ hot30.
+5. CORREÇÃO PLANEJADA em warmupAlerts: filtrar apenas dezenas com freq30 > 0 (não faz sentido alerta para dezena que não saiu). Também filtrar deltaFactor > 0. Teste espera number 5 (freq30=30, freq90=0) — como freq90=0 → deltaFactor=10 (rate90=0) → passará após filtro freq30>0.
+6. ranking test: teste "rankeia dezenas" com `if (key === "lstm") continue` aplicado (sed).
+Depois: rodar vitest (esperar 56/56 no arquivo), pnpm test completo (esperar 193/195), README seção Fase 27, marcar [x], checkpoint+publicação, entrega.
+
+### Fase 27 — CAUSA RAIZ DIAGNOSTICADA (debug 02:45):
+Cenário do teste: 90 draws (i=90..1 dias, [1,2,3,4,10,11]) + 30 draws (i=30..1, [5,1,2,3,4,6]).
+drawsWithinDays(30) → 58 draws; drawsWithinDays(90) → 119 draws.
+**Problema**: w90 = d90 = 119 draws inclui os 30 draws onde a dezena 5 aparece. Logo 5 NÃO é fria nos 90d (freq 29/119). cold90 = [7,8,9,12..18] (nunca saíram). hot30 = [1..6,10,11,7,8]. Interseção cold90∩hot30 = {7,8}, que têm freq30=0 → filtradas → resultado vazio.
+**Conceito correto**: o alerta deve comparar a mesma dezena entre a janela EXTERNA (90d sem os 30d internos) e a janela interna (30d). Ou seja: cold nos 90d DEVE ser calculado sobre d90 sem incluir os draws de d30 (senão a própria mudança "aquece" a média de 90d).
+**CORREÇÃO**: w90 deve excluir draws contidos em w30 → d90.filter(não está em w30Set). Então cold90 sobre o "passado antigo" e hot30 sobre o recente. Isso também exige total90 baseado no tamanho real.
+Alternativa mais simples aceita no produto: cold90 calculado sobre d90 completo mas a interseção é rara; melhor fazer w90_excl = w90 \ w30 como base do "frio antigo".
+**Plano**: em warmupAlerts, cold90 ← computeStats(type, w90.filter(d => !w30SetFinal.has(d.drawNumber))) mantendo hot30 sobre w30Final. Freq30/freq90 da saída: freq30 = by30 (w30Final), freq90 = freq no w90 (total, incluindo w30) — mais intuitivo pro usuário ("saiu X vezes nos 90d"). deltaFactor = rate30/rate90.
+**Teste**: esperar number=5 ∈ results (freq30=29, freq90=29, deltaFactor=10 pois freq90_excl... não: freq90 total = 29, rate90 = 29/(119*6) → delta = (29/58)/(29/119) = 119/58 ≈ 2.05 > 1 ✔). Ajustar asserção test: deltaFactor > 1 já usado ✔.
+**Outros detalhes**: test "retorna vazio quando nenhuma dezena fria vira quente" usa draws de 120 dias sem datas → fallback drawNumber: w30=últimos 30, w90=últimos 90 (subconjunto); hot30=[1,2,3,4,10,11,... zeros] → cold90 contém zeros → números com freq30=0 serão filtrados pelo novo filtro freq30>0 → retorna vazio ✔.
+Também lembrar: test 3 (drawsWithinDays fallback) — o teste "não retorna nada com poucos concursos" usa makeSyntheticDraws sem datas → fallback drawNumber funciona (w30/90 por slice).
+FALTA: implementar correção, rodar 56/56, pnpm test (193/195), README Fase 27, marcar [x], checkpoint, entrega.
+
+### Fase 27 — CAUSA RAIZ #2 (debug 02:48):
+Draws dated today-i*86400000 toISOString para i=30 → hoje-30d 02:45 UTC. cutoff = now-30*86400000 → mesma hora, o draw de i=30 fica EXATAMENTE na borda: drawsWithinDays usa >= cutoff, então incluído nos DOIS (d30 e d90). No primeiro loop (i=90..1) existem draws em i=30..1 com [1,2,3,4,10,11] que entram no d30. w30Final pega esses 30 draws SEM 5; w90Old = w90\w30Final fica com 61 draws (90-31..90 do loop1 + os draws do loop2 datados 30..~1,5 dias atrás que ficaram fora do cutoff de 30d). O draw de i=30 do loop2 (com 5) fica entre 30d e 30d+algumas horas → entra em w90Old com freq 1 → 5 não é frio.
+**CORREÇÃO SIMPLES E ROBUSTA**: no teste, usar datas mais separadas que a granularidade: desenhar draws do loop1 a 90..31 dias atrás e loop2 a 29..1 dias atrás (i = 90..31 e 29..1), garantindo gap > 1 dia entre janelas. Engine não precisa mudar.
+(Após corrigir o teste: esperado freqOld(5)=0, cold90Old contém 5, hot30 contém 5, deltaFactor=10.)

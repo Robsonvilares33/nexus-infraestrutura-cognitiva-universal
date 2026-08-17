@@ -87,9 +87,17 @@ export default function Loterias() {
     { enabled: !!stats },
   );
 
+  // ---------- Fase 27: ranking de dezenas do backtest + alerta de aquecimento ----------
+  const { data: numberRanking, isLoading: rankingLoading } = trpc.loterias.numberRanking.useQuery(
+    { type: lottery },
+    { enabled: !!stats },
+  );
+  const { data: warmup } = trpc.loterias.warmupAlerts.useQuery({ type: lottery }, { enabled: !!stats });
+
   // Fase 26: comparação de períodos lado a lado (30 vs 90 dias)
   const { data: stats30 } = trpc.loterias.stats.useQuery({ type: lottery, period: "30" }, { enabled: !!stats });
   const { data: stats90 } = trpc.loterias.stats.useQuery({ type: lottery, period: "90" }, { enabled: !!stats });
+  const warmedNumbers = useMemo(() => new Set(warmup?.numbers.map((w) => w.number) ?? []), [warmup]);
 
   const comparisonData = useMemo(() => {
     const f30 = stats30?.frequency ?? [];
@@ -528,6 +536,84 @@ export default function Loterias() {
             </CardContent>
           </Card>
 
+          {/* Fase 27: Top dezenas do backtest — taxa de acerto condicional por método + lista combinada */}
+          <Card className="bg-[#0a0d1a] border-[#7cff9f]/20">
+            <CardHeader>
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <Check className="w-4 h-4 text-[#7cff9f]" /> Top dezenas do backtest — {LOTTERY_LABELS[lottery]}
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Dezenas que mais apareceram nos resultados reais quando foram geradas por cada método (taxa de acerto condicional).
+                A lista combinada une os métodos com peso (LSTM/blend = 1, estatístico = 0,5, aleatório = 0,2).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {rankingLoading || !numberRanking ? (
+                <Skeleton className="h-24 bg-white/5" />
+              ) : numberRanking.combined.length === 0 ? (
+                <p className="text-sm text-white/50">Requer histórico suficiente (mín. 12 concursos) para calcular o ranking de dezenas.</p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Lista de confiança combinada */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-[#7cff9f] uppercase tracking-wide">Lista de confiança combinada</span>
+                      <span className="text-[10px] text-white/40">ordenada pela taxa de acerto condicional</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {numberRanking.combined.map((c, i) => (
+                        <span
+                          key={c.number}
+                          className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${
+                            warmedNumbers.has(c.number) ? "border-[#ffd479]/60 bg-[#ffd479]/15 text-[#ffd479]" : "border-[#7cff9f]/40 bg-[#7cff9f]/10 text-[#7cff9f]"
+                          }`}
+                        >
+                          {String(c.number).padStart(2, "0")}
+                          <span className="text-[9px] font-mono opacity-70">{(c.hitRate * 100).toFixed(0)}%</span>
+                          {i < 6 && <Flame className="w-3 h-3 opacity-60" />}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Tabs por método */}
+                  <Tabs defaultValue="combinada">
+                    <TabsList className="bg-white/5">
+                      {([
+                        { v: "combinada", label: "Combinada" },
+                        { v: "lstm", label: "LSTM" },
+                        { v: "blend", label: "LSTM + estatístico" },
+                        { v: "estatistico", label: "Estatístico" },
+                      ] as const).map(({ v, label }) => (
+                        <TabsTrigger key={v} value={v} className="data-[state=active]:bg-[#7cf3ff]/20">
+                          {label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    <TabsContent value="combinada" className="mt-3">
+                      <RankingTable rows={numberRanking.combined.map((c) => ({ number: c.number, hitRate: c.hitRate, score: c.score, generated: c.score }))} />
+                    </TabsContent>
+                    <TabsContent value="lstm" className="mt-3">
+                      {numberRanking.perMethod.lstm?.length ? (
+                        <RankingTable rows={numberRanking.perMethod.lstm} />
+                      ) : (
+                        <p className="text-xs text-white/50">Sem modelo LSTM treinado — treine o modelo para ver o ranking deste método.</p>
+                      )}
+                    </TabsContent>
+                    <TabsContent value="blend" className="mt-3">
+                      <RankingTable rows={numberRanking.perMethod.blend ?? []} />
+                    </TabsContent>
+                    <TabsContent value="estatistico" className="mt-3">
+                      <RankingTable rows={numberRanking.perMethod.estatistico ?? []} />
+                    </TabsContent>
+                  </Tabs>
+                  <p className="text-[11px] text-[#ffd479]/80">
+                    Taxa condicional = acertos ÷ vezes que a dezena foi gerada no método. Análise histórica apenas — não prevê resultados futuros.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Fase 25: painel de previsões LSTM */}
           <Card className="bg-[#0a0d1a] border-[#c9b8ff]/30">
             <CardHeader>
@@ -650,10 +736,19 @@ export default function Loterias() {
                 {/* Fase 26: comparação de períodos lado a lado */}
                 <Card className="bg-[#0a0d1a] border-white/10">
                   <CardHeader>
-                    <CardTitle className="text-white text-base">Comparação de períodos</CardTitle>
-                    <CardDescription className="text-white/50">
-                      Frequência por dezena nos últimos 30 vs 90 dias — tendências de aquecimento e resfriamento
-                    </CardDescription>
+                  <CardTitle className="text-white text-base">
+                    Comparação de períodos
+                    {warmup?.numbers.length ? (
+                      <Badge variant="outline" className="ml-2 border-[#ffd479]/60 text-[#ffd479] text-[10px]">
+                        <Flame className="w-3 h-3 mr-1" />
+                        {warmup.numbers.length} aquecendo
+                      </Badge>
+                    ) : null}
+                  </CardTitle>
+                  <CardDescription className="text-white/50">
+                    Frequência por dezena nos últimos 30 vs 90 dias — tendências de aquecimento e resfriamento
+                    {warmup?.numbers.length ? ` · ${warmup.numbers.length} dezena${warmup.numbers.length === 1 ? "" : "s"} fria${warmup.numbers.length === 1 ? "" : "s"} nos 90d viraram quente${warmup.numbers.length === 1 ? "" : "s"} nos 30d` : ""}
+                  </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {comparisonData.length > 0 ? (
@@ -1142,4 +1237,43 @@ function formatBRL(v: string): string {
   const n = parseFloat(v);
   if (!Number.isFinite(n)) return v;
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
+// Fase 27: mini-tabela do ranking de dezenas do backtest
+function RankingTable({
+  rows,
+}: {
+  rows: { number: number; hitRate: number; generated: number; hits?: number; score?: number }[];
+}) {
+  if (rows.length === 0) return <p className="text-xs text-white/50">Sem dados de ranking para este método.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-white/40">
+            <th className="py-1.5 pr-2 font-medium">Dezena</th>
+            <th className="py-1.5 pr-2 font-medium">Acertos</th>
+            <th className="py-1.5 pr-2 font-medium">Geradas</th>
+            <th className="py-1.5 pr-2 font-medium">Taxa</th>
+            <th className="py-1.5 font-medium">Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.number} className="border-t border-white/5">
+              <td className="py-1.5 pr-2">
+                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-black" style={{ background: NEXUS_CYAN }}>
+                  {String(r.number).padStart(2, "0")}
+                </span>
+              </td>
+              <td className="py-1.5 pr-2 font-mono text-white/80">{r.hits ?? Math.round(r.hitRate * r.generated) ?? "—"}</td>
+              <td className="py-1.5 pr-2 font-mono text-white/50">{r.generated ?? "—"}</td>
+              <td className="py-1.5 pr-2 font-mono font-bold text-[#7cff9f]">{(r.hitRate * 100).toFixed(1)}%</td>
+              <td className="py-1.5 font-mono text-white/50">{typeof r.score === "number" ? r.score.toFixed(1) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }

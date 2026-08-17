@@ -479,9 +479,15 @@ export function drawsWithinDays<T extends { drawDate: string | null }>(draws: T[
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   return draws.filter((d) => {
     if (!d.drawDate) return false;
+    let dt: Date | null = null;
     const parts = d.drawDate.split("/");
-    if (parts.length !== 3) return false;
-    const dt = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T00:00:00`);
+    if (parts.length === 3) {
+      // formato brasileiro DD/MM/YYYY (dados reais da Caixa)
+      dt = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T00:00:00`);
+    } else {
+      // formato ISO (ex.: dados sintéticos em testes)
+      dt = new Date(d.drawDate);
+    }
     return !Number.isNaN(dt.getTime()) && dt.getTime() >= cutoff;
   });
 }
@@ -749,6 +755,14 @@ async function trainLstmInBackground(type: LotteryType, modelId: number, epochs:
       lastDrawNumber: lastDraw,
       trainedAt: new Date(),
     });
+
+    // Fase 27: backtest automático pós-treino — calcula o ranking de dezenas
+    // com os novos pesos para que o painel da página mostre o ganho frente à linha de base
+    try {
+      void backtestNumberRanking(type, sorted, result.weights);
+    } catch {
+      // ranking opcional — falha não degrada o modelo treinado
+    }
   } catch (err) {
     await updateLotteryModel(modelId, { status: "failed" }).catch(() => {});
     lstmTrainingState.delete(type);
@@ -847,4 +861,163 @@ export function backtestByMethod(
     contests: evalRows.length,
     disclaimer: "Backtest histórico apenas — sorteios são aleatórios; a taxa de acertos passada não prevê resultados futuros.",
   };
+}
+
+/**
+ * Fase 27: ranking de dezenas do backtest.
+ * Acumula por dezena e método: quantas vezes a dezena foi gerada na aposta e
+ * quantas vezes ela saiu no resultado real. A taxa condicional (hits/generations)
+ * indica quais dezenas "seguram" a aposta de cada método — a lista combinada
+ * une as dezenas mais confiáveis de todos os métodos com peso.
+ */
+export function backtestNumberRanking(
+  type: LotteryType,
+  draws: LotteryDraw[],
+  weights: LstmWeights | null,
+  opts: { limit?: number; seed?: number; top?: number } = {},
+): {
+  perMethod: Record<string, { number: number; hitRate: number; generated: number; hits: number }[]>;
+  combined: { number: number; score: number; hitRate: number }[];
+  contests: number;
+} {
+  const sorted = [...draws].sort((a, b) => a.drawNumber - b.drawNumber);
+  const minHistory = 12;
+  const rows = opts.limit ? sorted.slice(-opts.limit) : sorted;
+  const toNumbers = (n: unknown): number[] => (Array.isArray(n) ? (n.filter((v) => typeof v === "number") as number[]) : []);
+
+  const stat: Record<string, Map<number, { generated: number; hits: number }>> = {
+    lstm: new Map(),
+    blend: new Map(),
+    estatistico: new Map(),
+    aleatorio: new Map(),
+  };
+  const combined = new Map<number, { score: number; hitRateNumerator: number; hitRateDenominator: number }>();
+
+  const random = mulberry32ForStats(opts.seed ?? 20260816);
+  for (let i = minHistory; i < rows.length; i++) {
+    const history = rows.slice(0, i).map((d) => toNumbers(d.numbers));
+    const truthNumbers = new Set(toNumbers(rows[i].numbers));
+    const seed = rows[i].drawNumber;
+    const stats = computeStats(type, rows.slice(0, i));
+    const statBet = generateStatisticalBet(type, stats, seed);
+
+    let lstmBet: number[] | null = null;
+    if (weights) {
+      try {
+        lstmBet = lstmPredict(weights, history).numbers;
+      } catch {
+        lstmBet = null;
+      }
+    }
+    const rnd = Array.from({ length: LOTTERY_DRAW_SIZE[type] }, () => Math.floor(random() * LOTTERY_MAX_NUMBER[type]) + 1);
+    const uniqueRnd = Array.from(new Set(rnd));
+    const randomBet =
+      uniqueRnd.length >= LOTTERY_DRAW_SIZE[type]
+        ? uniqueRnd.slice(0, LOTTERY_DRAW_SIZE[type])
+        : statBet;
+
+    const bets: Record<string, number[] | null> = {
+      lstm: lstmBet,
+      blend: lstmBet ? blendWithStats(lstmBet, statBet, 0.5) : statBet,
+      estatistico: statBet,
+      aleatorio: randomBet,
+    };
+    const methodsWithBets = Object.entries(bets).filter(([, b]) => b !== null) as [string, number[]][];
+    for (const [method, bet] of methodsWithBets) {
+      const m = stat[method];
+      for (const n of bet) {
+        const e = m.get(n) ?? { generated: 0, hits: 0 };
+        e.generated += 1;
+        if (truthNumbers.has(n)) e.hits += 1;
+        m.set(n, e);
+      }
+    }
+    for (const [method, bet] of methodsWithBets) {
+      const weight = method === "estatistico" ? 0.5 : method === "aleatorio" ? 0.2 : 1;
+      for (const n of bet) {
+        const e = combined.get(n) ?? { score: 0, hitRateNumerator: 0, hitRateDenominator: 0 };
+        e.score += weight;
+        if (truthNumbers.has(n)) e.hitRateNumerator += weight;
+        e.hitRateDenominator += weight;
+        combined.set(n, e);
+      }
+    }
+  }
+
+  const top = opts.top ?? 10;
+  const perMethod: Record<string, { number: number; hitRate: number; generated: number; hits: number }[]> = {};
+  for (const [k, m] of Object.entries(stat)) {
+    perMethod[k] = Array.from(m.entries())
+      .map(([number, v]) => ({ number, ...v, hitRate: v.generated > 0 ? v.hits / v.generated : 0 }))
+      .filter((v) => v.generated > 0)
+      .sort((a, b) => b.hitRate - a.hitRate || b.hits - a.hits)
+      .slice(0, top);
+  }
+
+  return {
+    perMethod,
+    combined: Array.from(combined.entries())
+      .map(([number, e]) => ({
+        number,
+        score: e.score,
+        hitRate: e.hitRateDenominator > 0 ? e.hitRateNumerator / e.hitRateDenominator : 0,
+      }))
+      .sort((a, b) => b.hitRate - a.hitRate || b.score - a.score)
+      .slice(0, top * 2),
+    contests: rows.slice(minHistory).length,
+  };
+}
+
+// ---------- Fase 27: alerta de aquecimento (fria → quente) ----------
+/**
+ * Identifica dezenas que estão entre as mais frias na janela de 90 dias,
+ * mas passaram a ser quentes na janela de 30 dias — sinal de aquecimento
+ * abrupto. Retorna também o delta de frequência (freq30d proporcional vs
+ * freq90d proporcional).
+ */
+export function warmupAlerts(type: LotteryType, draws: LotteryDraw[]): {
+  numbers: { number: number; freq30: number; freq90: number; deltaFactor: number }[];
+} {
+  const d30 = drawsWithinDays(draws, 30);
+  const d90 = drawsWithinDays(draws, 90);
+  // fallback por concurso quando não há datas suficientes (ex.: testes sintéticos):
+  // os 30/90 últimos sorteios por drawNumber
+  const sorted = [...draws].sort((a, b) => a.drawNumber - b.drawNumber);
+  const byNumber = sorted.length >= 10 ? sorted.slice(-90) : [];
+  const d30n = sorted.slice(-30);
+  const w30 = d30.length >= 3 ? d30 : d30n;
+  const w90 = d90.length >= 10 ? d90 : byNumber;
+  if (w30.length < 3 || w90.length < 10) return { numbers: [] };
+  // w30 precisa estar contido em w90 para o delta fazer sentido:
+  const w90Set = new Set(w90.map((d) => d.drawNumber));
+  const w30Filtered = w30.filter((d) => w90Set.has(d.drawNumber));
+  const w30Final = w30Filtered.length >= 3 ? w30Filtered : w30;
+  // para detectar aquecimento, o "frio" é avaliado no passado anterior aos 30d
+  // (senão os próprios draws quentes recentes diluiriam a janela de 90d):
+  const w30FinalSet = new Set(w30Final.map((d) => d.drawNumber));
+  const w90Old = w90.filter((d) => !w30FinalSet.has(d.drawNumber));
+  const stats90 = computeStats(type, w90Old.length >= 10 ? w90Old : w90);
+  const stats30 = computeStats(type, w30Final);
+  const total90 = w90.length;
+  const total30 = w30Final.length;
+
+  const cold90 = new Set(stats90.cold);
+  const hot30 = new Set(stats30.hot);
+
+  const by30 = new Map(stats30.frequency.map((s) => [s.number, s.frequency]));
+  const by90 = new Map(stats90.frequency.map((s) => [s.number, s.frequency]));
+
+  const numbers = stats30.hot
+    .filter((n) => cold90.has(n))
+    .map((number) => {
+      const f30 = by30.get(number) ?? 0;
+      const f90 = by90.get(number) ?? 0;
+      const rate30 = f30 / (total30 * LOTTERY_DRAW_SIZE[type]);
+      const rate90 = total90 > 0 ? f90 / (total90 * LOTTERY_DRAW_SIZE[type]) : 0;
+      return { number, freq30: f30, freq90: f90, deltaFactor: rate90 > 0 ? rate30 / rate90 : rate30 > 0 ? 10 : 0 };
+    })
+    .filter((n) => n.freq30 > 0 && n.deltaFactor > 0)
+    .sort((a, b) => b.deltaFactor - a.deltaFactor);
+
+  return { numbers };
 }

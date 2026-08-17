@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs } from "../db";
-import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, startLstmTraining, type LstmWeights, validateNumbers } from "../nexus-loterias";
+import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, backtestNumberRanking, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, startLstmTraining, type LstmWeights, validateNumbers, warmupAlerts } from "../nexus-loterias";
 import { storageGet, storagePut } from "../storage";
 
 // Coleção em andamento (uma coleta por processo, simples)
@@ -327,6 +327,29 @@ export const loteriasRouter = router({
         }
       }
       return backtestByMethod(input.type, rows, weights, { limit: input.limit });
+    }),
+
+  // Fase 27: ranking de dezenas do backtest (taxa de acerto condicional por método + lista combinada)
+  numberRanking: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES), limit: z.number().int().min(12).max(2000).optional() }))
+    .query(async ({ input }) => {
+      const rows = await listLotteryDraws(input.type, 2000);
+      if (rows.length < 12) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Histórico insuficiente para o ranking de dezenas de ${LOTTERY_LABELS[input.type]} (${rows.length} concursos; preciso de pelo menos 12).`,
+        });
+      }
+      const weights = getCachedLstmWeights(input.type);
+      return backtestNumberRanking(input.type, rows, weights, { limit: input.limit });
+    }),
+
+  // Fase 27: alerta de aquecimento — dezenas frias nos 90 dias que viraram quentes nos 30 dias
+  warmupAlerts: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES) }))
+    .query(async ({ input }) => {
+      const rows = await listLotteryDraws(input.type, 2000);
+      return warmupAlerts(input.type, rows);
     }),
 
   // Previsão LSTM: combina o modelo treinado com o histórico real
