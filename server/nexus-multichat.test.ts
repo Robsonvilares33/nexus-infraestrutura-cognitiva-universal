@@ -82,7 +82,7 @@ describe("Fase 18 — Chat multiagente", () => {
     const embMod = await import("./nexus-embeddings");
     vi.spyOn(embMod, "isEmbeddingAvailable").mockReturnValue(false);
     const searchFn = vi.fn(async () => [
-      { id: 22, userId: 1, title: "Token do GitHub", content: "token FAKE para o repositório", folder: "Geral", source: "user" },
+      { id: 22, userId: 1, title: "Token do GitHub", content: "***REMOVED***", folder: "Geral", source: "user" },
     ]);
     const { searchSuperNotes } = await import("./db");
     vi.mocked(searchSuperNotes).mockImplementation(searchFn as any);
