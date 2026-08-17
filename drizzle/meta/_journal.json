@@ -162,6 +162,20 @@
       "when": 1786935550556,
       "tag": "0022_yellow_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1786938587385,
+      "tag": "0023_keen_cargill",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1786938876877,
+      "tag": "0024_safe_drax",
+      "breakpoints": true
     }
   ]
 }

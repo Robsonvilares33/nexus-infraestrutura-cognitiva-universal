@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { addInAppNotification, countLotteryDraws, deleteLotteryAlert, getUserByOpenId, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, listLotteryWarmupEvents, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs } from "../db";
-import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, backtestNumberRanking, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, persistWarmupEvents, simulateBet, startLstmTraining, weeklyReportPayload, type LstmWeights, validateNumbers, warmupAlerts } from "../nexus-loterias";
+import { addInAppNotification, countLotteryDraws, deleteLotteryAlert, getUserByOpenId, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, listLotteryWarmupEvents, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs, upsertLotteryPortfolio, listLotteryPortfolios, insertLotteryPortfolioEvolution, listLotteryPortfolioEvolution, updateLotteryPortfolioLastDrawChecked } from "../db";
+import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, backtestNumberRanking, blendWithStats, buildLstmDataset, buildLotofacilPortfolio, checkBetHits, checkPortfolioVsDraw, collectAndPersist, computeStats, drawsWithinDays, evolvePortfolioWeights, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, persistWarmupEvents, simulateBet, startLstmTraining, weeklyReportPayload, PORTFOLIO_DISCLAIMER, type LstmWeights, validateNumbers, warmupAlerts } from "../nexus-loterias";
 import { storageGet, storagePut } from "../storage";
 
 // Coleção em andamento (uma coleta por processo, simples)
@@ -546,6 +546,122 @@ export const loteriasRouter = router({
         checked: 0,
       });
       return { saved: true, type, drawNumber };
+    }),
+
+  // ---------- Fase 29: portfólio evolutivo de jogos (33 jogos Lotofácil) ----------
+
+  /** Gera ou regenera o portfólio de jogos que cercam os números-alvo, com pesos cognitivos. */
+  generatePortfolio: protectedProcedure
+    .input(
+      z.object({
+        lotteryType: z.enum(LOTTERY_TYPES),
+        targetNumbers: z.array(z.number().int()).min(1).max(20),
+        count: z.number().int().min(1).max(100).default(33),
+        size: z.number().int().min(5).max(20).default(15),
+        weights: z.record(z.string(), z.number()).optional(),
+        seed: z.number().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const type = input.lotteryType;
+      const rows = await listLotteryDraws(type, 2000);
+      if (rows.length < 12) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Coleta insuficiente para gerar o portfólio (${rows.length} concursos; mínimo 12). Use "Coletar dados" da ${LOTTERY_LABELS[type]}.`,
+        });
+      }
+      const targetSet = new Set(input.targetNumbers);
+      const dedup = Array.from(targetSet).sort((a, b) => a - b);
+      const weights = input.weights && Object.keys(input.weights).length > 0 ? input.weights : undefined;
+      const existing = (await listLotteryPortfolios(ctx.user.id)).find((p) => p.lotteryType === type);
+      const currentWeights = weights ?? existing?.cognitiveWeights;
+      const seed = input.seed ?? Date.now() + (existing?.evolutionSeed ?? 0);
+      const result = buildLotofacilPortfolio(type, rows, dedup, {
+        count: input.count,
+        size: input.size,
+        weights: currentWeights ?? undefined,
+        seed,
+      });
+      const nextSeed = (existing?.evolutionSeed ?? 0) + 1;
+      const id = await upsertLotteryPortfolio(ctx.user.id, type, {
+        targetNumbers: dedup,
+        games: result.games,
+        cognitiveWeights: result.weights,
+        evolutionSeed: nextSeed,
+      });
+      return { portfolioId: id, games: result.games, weights: result.weights, seed: result.seed, disclaimer: PORTFOLIO_DISCLAIMER };
+    }),
+
+  /** Confere o portfólio contra o último sorteio coletado, evolui os pesos e regenera os jogos. */
+  checkPortfolio: protectedProcedure
+    .input(z.object({ lotteryType: z.enum(LOTTERY_TYPES) }))
+    .mutation(async ({ ctx, input }) => {
+      const type = input.lotteryType;
+      const portfolio = (await listLotteryPortfolios(ctx.user.id)).find((p) => p.lotteryType === type);
+      if (!portfolio || portfolio.games.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Gere o portfólio primeiro." });
+      }
+      const rows = await listLotteryDraws(type, 2000);
+      const last = [...rows].sort((a, b) => a.drawNumber - b.drawNumber).at(-1);
+      if (!last) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Nenhum sorteio coletado." });
+      const drawn = last.numbers as number[];
+      const result = checkPortfolioVsDraw(portfolio.games, drawn);
+      await insertLotteryPortfolioEvolution(portfolio.id, last.drawNumber, {
+        bestHits: result.bestHits,
+        hitsDist: result.hitsDist,
+        hits13Plus: result.hits13Plus,
+        hits14: result.hits14,
+        hits15: result.hits15,
+        weightsSnapshot: portfolio.cognitiveWeights ?? null,
+      });
+      await updateLotteryPortfolioLastDrawChecked(portfolio.id, last.drawNumber);
+      const nextWeights = evolvePortfolioWeights(portfolio.cognitiveWeights ?? null, result);
+      const newSeed = (portfolio.evolutionSeed ?? 0) + 1;
+      const regenerated = buildLotofacilPortfolio(type, rows, portfolio.targetNumbers ?? [], {
+        count: portfolio.games.length,
+        size: 15,
+        weights: nextWeights,
+        seed: Date.now() + newSeed,
+      });
+      await upsertLotteryPortfolio(ctx.user.id, type, {
+        targetNumbers: portfolio.targetNumbers ?? [],
+        games: regenerated.games,
+        cognitiveWeights: regenerated.weights,
+        evolutionSeed: newSeed,
+      });
+      return {
+        portfolioId: portfolio.id,
+        drawNumber: last.drawNumber,
+        drawDate: last.drawDate,
+        drawn,
+        check: result,
+        newWeights: regenerated.weights,
+        newGames: regenerated.games,
+        evolutionMessage:
+          result.bestHits >= 13
+            ? "Desempenho forte — motor reforçou LSTM e estatística."
+            : result.bestHits >= 11
+              ? "Transição de regime — motor reforçou aquecimento e anomalias."
+              : "Desempenho fraco — motor aumentou exploração para escapar do padrão atual.",
+        disclaimer: PORTFOLIO_DISCLAIMER,
+      };
+    }),
+
+  listPortfolios: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await listLotteryPortfolios(ctx.user.id);
+    return rows.map((r) => ({ ...r, coverage: undefined }));
+  }),
+
+  portfolioEvolution: protectedProcedure
+    .input(z.object({ portfolioId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await listLotteryPortfolioEvolution(input.portfolioId, 60);
+      const owned = rows.length > 0
+        ? (await listLotteryPortfolios(ctx.user.id)).some((p) => p.id === rows[0].portfolioId)
+        : true;
+      if (!owned && rows.length > 0) return [];
+      return rows;
     }),
 });
 

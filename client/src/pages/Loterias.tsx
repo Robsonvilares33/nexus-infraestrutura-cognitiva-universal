@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Bell, Check, Flame, Loader2, RefreshCw, Snowflake, Timer, TrendingUp, Trash2, Wallet } from "lucide-react";
+import { AlertCircle, Bell, Check, Flame, Loader2, RefreshCw, Snowflake, Timer, TrendingUp, Trash2, Wallet, Target, Zap, Layers, History } from "lucide-react";
 
 const NEXUS_CYAN = "#7cf3ff";
 const NEXUS_PURPLE = "#c9b8ff";
@@ -121,6 +121,92 @@ export default function Loterias() {
     { type: lottery, numbers: simNumbers },
     { enabled: simNumbers.length === LOTTERY_SIZES[lottery] && simNumbers.every((n) => n >= 1 && n <= LOTTERY_MAX[lottery]) },
   );
+
+  // ---------- Fase 29: portfólio evolutivo de 33 jogos ----------
+  const [portfolioTargets, setPortfolioTargets] = useState<number[]>([]);
+  const generatePortfolioMutation = trpc.loterias.generatePortfolio.useMutation();
+  const checkPortfolioMutation = trpc.loterias.checkPortfolio.useMutation();
+  const { data: portfolios } = trpc.loterias.listPortfolios.useQuery(undefined, { enabled: !!user, refetchInterval: 10000 });
+  const currentPortfolio = portfolios?.find((p) => p.lotteryType === lottery) ?? null;
+  const { data: portfolioEvolution } = trpc.loterias.portfolioEvolution.useQuery(
+    { portfolioId: currentPortfolio?.id ?? 0 },
+    { enabled: !!currentPortfolio?.id },
+  );
+  const [checkResult, setCheckResult] = useState<{
+    drawNumber: number;
+    drawDate: string | null;
+    drawn: number[];
+    check: { hitsPerGame: number[]; bestHits: number; hits13Plus: number; hits14: number; hits15: number; avgHits: number };
+    message: string;
+  } | null>(null);
+
+  const handleTogglePortfolioNumber = (n: number) => {
+    const size = LOTTERY_SIZES[lottery];
+    setPortfolioTargets((prev) => {
+      if (prev.includes(n)) return prev.filter((x) => x !== n);
+      if (prev.length >= size) {
+        toast.info(`Selecione no máximo ${size} dezenas-alvo para a ${LOTTERY_LABELS[lottery]}`);
+        return prev;
+      }
+      return [...prev, n].sort((a, b) => a - b);
+    });
+  };
+
+  const handleGeneratePortfolio = async () => {
+    if (!user) {
+      toast.error("Faça login para gerar o portfólio");
+      return;
+    }
+    const size = LOTTERY_SIZES[lottery];
+    const targets = portfolioTargets.length >= size ? portfolioTargets.slice(0, size) : [];
+    try {
+      await generatePortfolioMutation.mutateAsync({
+        lotteryType: lottery,
+        targetNumbers: targets,
+        count: 33,
+      });
+      toast.success(`Portfólio de 33 jogos da ${LOTTERY_LABELS[lottery]} gerado pelo motor cognitivo — clique em "Conferir último sorteio" para evoluí-lo.`);
+      await utils.loterias.listPortfolios.invalidate();
+      await utils.loterias.portfolioEvolution.invalidate({ portfolioId: currentPortfolio?.id ?? 0 });
+      setCheckResult(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao gerar o portfólio");
+    }
+  };
+
+  const handleCheckPortfolio = async () => {
+    if (!user || !currentPortfolio) {
+      toast.error("Gere o portfólio primeiro");
+      return;
+    }
+    try {
+      const res = await checkPortfolioMutation.mutateAsync({ lotteryType: lottery });
+      setCheckResult({ drawNumber: res.drawNumber, drawDate: res.drawDate, drawn: res.drawn, check: res.check, message: res.evolutionMessage });
+      if (res.check.hits15 > 0) toast.success(`🏆 ${res.check.hits15} jogo(s) com 15 acertos no concurso #${res.drawNumber}!`);
+      else if (res.check.hits14 > 0) toast.success(`${res.check.hits14} jogo(s) com 14 acertos no concurso #${res.drawNumber}!`);
+      else if (res.check.hits13Plus > 0) toast.success(`${res.check.hits13Plus} jogo(s) com 13+ acertos no concurso #${res.drawNumber}!`);
+      else toast.info(`Melhor resultado no concurso #${res.drawNumber}: ${res.check.bestHits} acertos. ${res.evolutionMessage}`);
+      if (res.disclaimer) toast.info(res.disclaimer);
+      await utils.loterias.listPortfolios.invalidate();
+      await utils.loterias.portfolioEvolution.invalidate({ portfolioId: res.portfolioId });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao conferir o portfólio");
+    }
+  };
+
+  const portfolioHitsDist = useMemo(() => {
+    if (!portfolioEvolution || portfolioEvolution.length === 0) return [];
+    return [...portfolioEvolution]
+      .sort((a, b) => a.drawNumber - b.drawNumber)
+      .map((e) => ({ concurso: `#${e.drawNumber}`, "15 pts": e.hits15, "14 pts": e.hits14, "13 pts": e.hits13Plus - e.hits14, "12 pts": (e.hitsDist as Record<string, number>)?.hits12 ?? 0, "11 pts": (e.hitsDist as Record<string, number>)?.hits11 ?? 0 }));
+  }, [portfolioEvolution]);
+
+  const evolutionLine = useMemo(() => {
+    if (!portfolioEvolution || portfolioEvolution.length === 0) return [];
+    return [...portfolioEvolution]
+      .sort((a, b) => a.drawNumber - b.drawNumber)
+      .map((e) => ({ concurso: `#${e.drawNumber}`, bestHits: e.bestHits }));
+  }, [portfolioEvolution]);
 
   // ---------- Fase 27: ranking de dezenas do backtest + alerta de aquecimento ----------
   const { data: numberRanking, isLoading: rankingLoading } = trpc.loterias.numberRanking.useQuery(
@@ -498,6 +584,131 @@ export default function Loterias() {
         </Card>
       ) : (
         <>
+          {/* Fase 29: portfólio evolutivo de 33 jogos */}
+          {lottery === "lotofacil" && (
+            <Card className="bg-[#0a0d1a] border-[#a6162e]/40">
+              <CardHeader>
+                <CardTitle className="text-white text-base flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-[#a6162e]" style={{ color: NEXUS_PURPLE }} /> Portfólio de 33 jogos — {LOTTERY_LABELS.lotofacil}
+                </CardTitle>
+                <CardDescription className="text-white/50">
+                  O motor cognitivo (LSTM + estatística + aquecimento + anomalias + exploração) monta 33 jogos que “cercam” as dezenas-alvo selecionadas, e evolui os pesos a cada concurso: reforça o que acertou 13/14/15 e muda de estratégia quando erra.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label className="text-white/70">Selecione as {LOTTERY_SIZES.lotofacil} dezenas-alvo ({portfolioTargets.length}/15)</Label>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {Array.from({ length: LOTTERY_MAX.lotofacil }, (_, i) => i + 1).map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => handleTogglePortfolioNumber(n)}
+                        className={`w-8 h-8 rounded-full text-xs font-bold border transition-transform active:scale-95 ${
+                          portfolioTargets.includes(n)
+                            ? "text-black border-transparent"
+                            : "bg-white/5 border-white/15 text-white/70 hover:border-[#c9b8ff]/50"
+                        }`}
+                        style={portfolioTargets.includes(n) ? { background: LOTTERY_COLORS.lotofacil } : undefined}
+                      >
+                        {String(n).padStart(2, "0")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    className="bg-[#a6162e] hover:bg-[#c01a36] text-white"
+                    onClick={handleGeneratePortfolio}
+                    disabled={generatePortfolioMutation.isPending || !hasData}
+                  >
+                    {generatePortfolioMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                    Gerar / Atualizar 33 jogos
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-[#7cf3ff]/40 text-[#7cf3ff] hover:bg-[#7cf3ff]/10"
+                    onClick={handleCheckPortfolio}
+                    disabled={checkPortfolioMutation.isPending || !currentPortfolio}
+                  >
+                    {checkPortfolioMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+                    Conferir último sorteio
+                  </Button>
+                </div>
+                {checkResult && (
+                  <div className="rounded-lg border border-[#c9b8ff]/30 bg-[#c9b8ff]/5 p-3 text-sm space-y-1">
+                    <p className="text-white/80">
+                      <strong>Concurso #{checkResult.drawNumber}</strong>{checkResult.drawDate ? ` · ${checkResult.drawDate}` : ""} — melhor jogo: <span className="font-bold text-[#7cff9f]">{checkResult.check.bestHits} acertos</span>
+                    </p>
+                    <p className="text-white/60 text-xs">
+                      Jogos com 13+: {checkResult.check.hits13Plus} · 14 acertos: {checkResult.check.hits14} · 15 acertos: {checkResult.check.hits15} · média: {checkResult.check.avgHits.toFixed(1)}
+                    </p>
+                    <p className="text-[#c9b8ff] text-xs italic">{checkResult.message}</p>
+                  </div>
+                )}
+                {currentPortfolio && (
+                  <div className="space-y-3">
+                    <div className="max-h-56 overflow-y-auto rounded-lg border border-white/10 p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-6 gap-1.5">
+                      {currentPortfolio.games.map((g: { numbers: number[] }, i: number) => (
+                        <div key={i} className="flex flex-wrap gap-0.5 rounded-md bg-white/5 px-1.5 py-1">
+                          {(g.numbers as number[]).map((n: number) => (
+                            <span key={n} className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-black" style={{ background: LOTTERY_COLORS.lotofacil }}>
+                              {n}
+                            </span>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    {portfolioHitsDist.length > 0 && (
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-white/50 mb-1 flex items-center gap-1"><History className="w-3 h-3" /> Distribuição de acertos por concurso</p>
+                          <ResponsiveContainer width="100%" height={180}>
+                            <BarChart data={portfolioHitsDist}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff15" />
+                              <XAxis dataKey="concurso" tick={{ fontSize: 10, fill: "#ffffff80" }} />
+                              <YAxis tick={{ fontSize: 10, fill: "#ffffff80" }} />
+                              <Tooltip contentStyle={{ background: "#0a0d1a", border: "1px solid #7cf3ff40", borderRadius: 8 }} />
+                              <Legend wrapperStyle={{ fontSize: 11 }} />
+                              <Bar dataKey="15 pts" stackId="a" fill="#7cff9f" />
+                              <Bar dataKey="14 pts" stackId="a" fill={NEXUS_GOLD} />
+                              <Bar dataKey="13 pts" stackId="a" fill={NEXUS_PURPLE} />
+                              <Bar dataKey="12 pts" stackId="b" fill="#5ba4ff" />
+                              <Bar dataKey="11 pts" stackId="b" fill="#ffffff30" />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div>
+                          <p className="text-xs text-white/50 mb-1 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Evolução do melhor resultado (metas 13 / 14 / 15)</p>
+                          <ResponsiveContainer width="100%" height={180}>
+                            <LineChart data={evolutionLine}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff15" />
+                              <XAxis dataKey="concurso" tick={{ fontSize: 10, fill: "#ffffff80" }} />
+                              <YAxis domain={[0, 15]} ticks={[0, 10, 11, 12, 13, 14, 15]} tick={{ fontSize: 10, fill: "#ffffff80" }} />
+                              <Tooltip contentStyle={{ background: "#0a0d1a", border: "1px solid #7cf3ff40", borderRadius: 8 }} />
+                              <Line type="monotone" dataKey="bestHits" stroke={NEXUS_CYAN} strokeWidth={2} dot={{ r: 2 }} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                          <div className="flex gap-2 text-[10px] text-white/40 mt-1">
+                            <span>linha 13: <span className="text-[#7cff9f]">●</span></span>
+                            <span>linha 14: <span className="text-[#ffd479]">●</span></span>
+                            <span>linha 15: <span className="text-[#c9b8ff]">●</span></span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {currentPortfolio.cognitiveWeights && (
+                      <p className="text-[11px] text-white/40">
+                        Pesos atuais do motor: LSTM {(currentPortfolio.cognitiveWeights.lstm * 100).toFixed(0)}% · estatístico {(currentPortfolio.cognitiveWeights.statistical * 100).toFixed(0)}% · aquecimento {(currentPortfolio.cognitiveWeights.warmup * 100).toFixed(0)}% · anomalia {(currentPortfolio.cognitiveWeights.anomaly * 100).toFixed(0)}% · exploração {(currentPortfolio.cognitiveWeights.exploration * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
+                )}
+                <p className="text-[11px] text-white/35">Cada loteiro custa R$ 3,00 (33 jogos = R$ 99,00). O portfólio cobre as dezenas-alvo de forma balanceada — quanto melhor a escolha dos 15 alvos, maior a probabilidade de atingir 13/14/15. Resultados não garantem prêmio.</p>
+              </CardContent>
+            </Card>
+          )}
           {/* Últimos sorteios */}
           <Card className="bg-[#0a0d1a] border-white/10">
             <CardHeader>

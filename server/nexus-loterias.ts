@@ -1155,3 +1155,286 @@ export async function persistWarmupEvents(
     deltaFactor: String(d.deltaFactor ?? 0),
   }));
 }
+
+// ---------- Fase 29: portfólio evolutivo de 33 jogos (Lotofácil) ----------
+/**
+ * Motor cognitivo de portfólio evolutivo: gera N jogos que "cercam" os números-
+ * alvo, combinando LSTM, estatística, aquecimento, anti-anomalia e exploração.
+ * A cada novo sorteio, os pesos são reforçados (o que acertou 13+ recebe mais
+ * peso) e os jogos são regenerados com o mesmo alvo.
+ */
+export const DEFAULT_PORTFOLIO_WEIGHTS: Record<string, number> = {
+  lstm: 0.28,
+  statistical: 0.24,
+  warmup: 0.18,
+  anomaly: 0.16,
+  exploration: 0.14,
+};
+
+export type PortfolioWeights = Record<string, number>;
+
+/** Normaliza pesos para somar 1 (proteção contra entradas manuais). */
+export function normalizeWeights(weights: PortfolioWeights): PortfolioWeights {
+  const total = Object.values(weights).reduce((s, v) => s + Math.max(0, Number(v) || 0), 0);
+  if (total <= 0) return { ...DEFAULT_PORTFOLIO_WEIGHTS };
+  const keys = Object.keys(weights);
+  const out: PortfolioWeights = {};
+  for (const k of keys) out[k] = Math.max(0, Number(weights[k]) || 0) / total;
+  return out;
+}
+
+/** Score cognitivo por dezena (0..1), mesclando as 5 fontes de inteligência. */
+export function cognitiveNumberScores(
+  type: LotteryType,
+  draws: LotteryDraw[],
+  weights: PortfolioWeights,
+  targetNumbers: number[],
+  seed: number = 0,
+): Map<number, number> {
+  const maxNum = LOTTERY_MAX_NUMBER[type];
+  const scores = new Map<number, number>();
+  for (let n = 1; n <= maxNum; n++) scores.set(n, 0);
+
+  const w = normalizeWeights(weights);
+
+  // 1. LSTM — predição ponderada sobre o histórico ordenado
+  const cached = getCachedLstmWeights(type);
+  const sorted = [...draws].sort((a, b) => a.drawNumber - b.drawNumber);
+  const history = sorted.map((d) => (d.numbers as number[]).slice().sort((a, b) => a - b)).filter((n) => n.length > 0);
+  if (cached && history.length >= 12) {
+    const pred = lstmPredict(cached, history.slice(-60));
+    const top = new Set(pred.numbers.slice(0, 20));
+    for (const [n, s] of Array.from(scores.entries())) scores.set(n, s + (top.has(n) ? w.lstm : w.lstm * 0.15));
+  }
+  // sem LSTM treinado: redistribui o peso para a estatística (recalcula os scores sem recursão)
+  if (!cached || history.length < 12) {
+    const w2: PortfolioWeights = { ...w, statistical: w.statistical + w.lstm, lstm: 0 };
+    for (const n of Array.from(scores.keys())) scores.set(n, 0);
+    const statsNoLstm = computeStats(type, sorted);
+    const maxFreqNoLstm = Math.max(1, ...statsNoLstm.frequency.map((s) => s.frequency));
+    for (const f of statsNoLstm.frequency) {
+      const freqScore = f.frequency / maxFreqNoLstm;
+      const delayScore = f.delay <= 2 ? 0.9 : f.delay <= 6 ? 0.55 : 0.2;
+      scores.set(f.number, w2.statistical * (freqScore * 0.65 + delayScore * 0.35));
+    }
+  }
+
+  // 2. Estatística descritiva — frequência ponderada + atraso inverso
+  const stats = computeStats(type, sorted);
+  const maxFreq = Math.max(1, ...stats.frequency.map((s) => s.frequency));
+  for (const f of stats.frequency) {
+    const freqScore = f.frequency / maxFreq;
+    const delayScore = f.delay <= 2 ? 0.9 : f.delay <= 6 ? 0.55 : 0.2;
+    scores.set(f.number, (scores.get(f.number) ?? 0) + w.statistical * (freqScore * 0.65 + delayScore * 0.35));
+  }
+
+  // 3. Aquecimento — dezenas frias que esquentaram (deltaFactor)
+  const warm = warmupAlerts(type, sorted);
+  const warmByNumber = new Map(warm.numbers.map((x) => [x.number, Math.min(2, x.deltaFactor)]));
+  const hot30 = new Set(stats.hot);
+  for (const [n, s] of Array.from(scores.entries())) {
+    const ws = warmByNumber.get(n) ?? 0;
+    scores.set(n, s + w.warmup * (ws / 2) * (hot30.has(n) ? 1 : 0.4));
+  }
+
+  // 4. Anti-anomalia — verifica paridade saudável do último concurso
+  const last = sorted[sorted.length - 1]?.numbers as number[] | undefined;
+  if (last && Array.isArray(last)) {
+    const evenCount = last.filter((x) => x % 2 === 0).length;
+    const healthyParity = evenCount >= 6 && evenCount <= 9;
+    if (!healthyParity) {
+      for (const [n, s] of Array.from(scores.entries())) {
+        const recent = sorted.slice(-10);
+        const appear = recent.filter((d) => ((d.numbers as number[]) ?? []).includes(n)).length;
+        scores.set(n, s + w.anomaly * (appear >= 7 ? -0.12 : 0));
+      }
+    }
+  }
+
+  // 5. Exploração determinística (semente evolutiva) — garante diversidade entre regenerações
+  const rng = mulberry32ForStats(seed || Date.now());
+  for (const [n, s] of Array.from(scores.entries())) scores.set(n, s + w.exploration * rng());
+
+  // 6. Bônus "cercar alvo" — os números-alvo recebem prioridade
+  const targetSet = new Set(targetNumbers);
+  const targetBoost = 1.35;
+  for (const n of targetNumbers) scores.set(n, (scores.get(n) ?? 0) * targetBoost + 0.4);
+  for (const [n, s] of Array.from(scores.entries())) {
+    if (!targetSet.has(n)) scores.set(n, s * 0.9);
+  }
+
+  return scores;
+}
+
+export type PortfolioResult = {
+  games: Array<{ numbers: number[]; fromTarget: number; fromOutside: number }>;
+  weights: PortfolioWeights;
+  seed: number;
+  /** quantos jogos cada dezena aparece */
+  coverage: Map<number, number>;
+};
+
+/**
+ * Gera `count` jogos de `size` dezenas que cercam `targetNumbers`.
+ * Cobertura garantida: cada alvo aparece em pelo menos `minCover` jogos,
+ * distribuídos de forma equilibrada entre os jogos.
+ */
+export function buildLotofacilPortfolio(
+  type: LotteryType,
+  draws: LotteryDraw[],
+  targetNumbers: number[],
+  options: { count?: number; size?: number; weights?: PortfolioWeights; seed?: number; minCover?: number } = {},
+): PortfolioResult {
+  const { count = 33, size = 15, weights = DEFAULT_PORTFOLIO_WEIGHTS, seed = Date.now(), minCover = 8 } = options;
+  const maxNum = LOTTERY_MAX_NUMBER[type];
+  const scores = cognitiveNumberScores(type, draws, weights, targetNumbers, seed);
+  const sortedNumbers = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
+  const targetSet = new Set(targetNumbers);
+
+  const minCoverCapped = Math.min(minCover, count);
+  const games: Array<{ numbers: number[]; fromTarget: number; fromOutside: number }> = [];
+  for (let i = 0; i < count; i++) games.push({ numbers: [], fromTarget: 0, fromOutside: 0 });
+
+  // atribui alvos aos jogos em rodízio (jogos com menos alvos primeiro)
+  const gameAlvoCounts = new Array(count).fill(0);
+  const assigned: Map<number, Set<number>> = new Map();
+  for (const t of targetNumbers) assigned.set(t, new Set());
+  const maxAlvoPerGame = Math.min(size - 2, 13);
+
+  const targetByScore = [...targetNumbers].sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0));
+  for (const t of targetByScore) {
+    const tAssigned = assigned.get(t)!;
+    for (let k = 0; k < minCoverCapped; k++) {
+      const idx = gameAlvoCounts
+        .map((c, i) => ({ c, i }))
+        .filter((x) => !tAssigned.has(x.i) && x.c < maxAlvoPerGame)
+        .sort((a, b) => a.c - b.c || a.i - b.i)[0]?.i;
+      if (idx === undefined) break;
+      games[idx].numbers.push(t);
+      games[idx].fromTarget += 1;
+      gameAlvoCounts[idx] += 1;
+      tAssigned.add(idx);
+    }
+  }
+
+  // completa cada jogo com dezenas fora do alvo, por score + diversidade
+  const outside = sortedNumbers.filter(([n]) => !targetSet.has(n));
+  const rng = mulberry32ForStats(seed + 7);
+  const coverage = new Map<number, number>();
+  for (const t of targetNumbers) coverage.set(t, assigned.get(t)?.size ?? 0);
+
+  const usedNumbers = new Set<number>();
+  for (let i = 0; i < count; i++) {
+    const need = size - games[i].numbers.length;
+    if (need <= 0) continue;
+    // números já usados neste jogo (alvos atribuídos) — evita duplicados no jogo
+    const gameUsed = new Set(games[i].numbers);
+    for (const n of Array.from(gameUsed)) usedNumbers.add(n);
+    const pool = outside
+      .filter(([n]) => !gameUsed.has(n))
+      .map(([n, s]) => ({ n, s, use: usedNumbers.has(n) ? 0.04 : 0 }))
+      .sort((a, b) => b.s + b.use - (a.s + a.use))
+      .slice(0, Math.max(need, 40));
+    const picked: number[] = [];
+    while (picked.length < need && pool.length > 0) {
+      const rankBias = Math.floor(rng() * Math.min(8, pool.length));
+      const choice = pool.splice(rankBias, 1)[0];
+      if (gameUsed.has(choice.n)) continue; // segurança contra duplicados
+      picked.push(choice.n);
+      gameUsed.add(choice.n);
+      usedNumbers.add(choice.n);
+      coverage.set(choice.n, (coverage.get(choice.n) ?? 0) + 1);
+    }
+    // fallback: se o pool acabou antes de completar o jogo, usa qualquer dezena livre
+    let fallback = 1;
+    while (picked.length < need) {
+      fallback = (fallback % maxNum) + 1;
+      if (!gameUsed.has(fallback)) {
+        picked.push(fallback);
+        gameUsed.add(fallback);
+        usedNumbers.add(fallback);
+        coverage.set(fallback, (coverage.get(fallback) ?? 0) + 1);
+      }
+      fallback += 1;
+    }
+    games[i].numbers.push(...picked.sort((a, b) => a - b));
+    games[i].fromOutside += picked.length;
+  }
+
+  return {
+    games: games.map((g) => ({
+      numbers: Array.from(new Set(g.numbers)).sort((a, b) => a - b),
+      fromTarget: g.fromTarget,
+      fromOutside: g.fromOutside,
+    })),
+    weights: normalizeWeights(weights),
+    seed,
+    coverage,
+  };
+}
+
+/** Confere o portfólio contra um concurso e produz a distribuição de acertos. */
+export function checkPortfolioVsDraw(
+  games: Array<{ numbers: number[] }>,
+  drawnNumbers: number[] | null,
+): {
+  hitsPerGame: number[];
+  bestHits: number;
+  hitsDist: Record<string, number>;
+  hits13Plus: number;
+  hits14: number;
+  hits15: number;
+  avgHits: number;
+} {
+  const hitsPerGame = drawnNumbers
+    ? games.map((g) => checkBetHits(g.numbers, drawnNumbers) ?? 0)
+    : games.map(() => 0);
+  const hitsDist: Record<string, number> = {};
+  for (let h = 10; h <= 15; h++) hitsDist[`hits${h}`] = 0;
+  for (const h of hitsPerGame) hitsDist[`hits${Math.min(15, Math.max(10, h))}`] += 1;
+  const hits15 = hitsPerGame.filter((h) => h === 15).length;
+  const hits14 = hitsPerGame.filter((h) => h === 14).length;
+  const hits13Plus = hitsPerGame.filter((h) => h >= 13).length;
+  const bestHits = hitsPerGame.length ? Math.max(...hitsPerGame) : 0;
+  const avgHits = hitsPerGame.length ? hitsPerGame.reduce((s, h) => s + h, 0) / hitsPerGame.length : 0;
+  return { hitsPerGame, bestHits, hitsDist, hits13Plus, hits14, hits15, avgHits };
+}
+
+/**
+ * Evolução dos pesos por reforço: compara o desempenho do portfólio com o
+ * desempenho esperado e ajusta as fontes de inteligência.
+ * - bestHits >= 13 → reforça LSTM + estatística (sinais quentes funcionaram)
+ * - bestHits 11-12 → reforça warmup + anomaly (transição de regime)
+ * - bestHits <= 10 → reforça exploration (o modelo está "preso" em um padrão)
+ * O ajuste é suave (15% por passo) para não oscilar entre sorteios.
+ */
+export function evolvePortfolioWeights(
+  current: PortfolioWeights | null,
+  result: ReturnType<typeof checkPortfolioVsDraw>,
+): PortfolioWeights {
+  const base = current ? normalizeWeights(current) : { ...DEFAULT_PORTFOLIO_WEIGHTS };
+  const best = result.bestHits;
+  const delta: Record<string, number> = { lstm: 0, statistical: 0, warmup: 0, anomaly: 0, exploration: 0 };
+  const STEP = 0.15;
+  if (best >= 13) {
+    delta.lstm = STEP; delta.statistical = STEP * 0.6;
+    delta.warmup = -STEP * 0.5; delta.anomaly = -STEP * 0.5; delta.exploration = -STEP * 0.6;
+  } else if (best >= 11) {
+    delta.warmup = STEP; delta.anomaly = STEP * 0.6;
+    delta.lstm = -STEP * 0.4; delta.exploration = -STEP * 0.5; delta.statistical = -STEP * 0.7;
+  } else {
+    delta.exploration = STEP * 1.4; delta.warmup = STEP * 0.4;
+    delta.lstm = -STEP * 0.6; delta.statistical = -STEP * 0.8; delta.anomaly = -STEP * 0.4;
+  }
+  const next: PortfolioWeights = {};
+  let total = 0;
+  for (const k of Object.keys(base)) {
+    next[k] = Math.max(0.04, base[k] + (delta[k] ?? 0));
+    total += next[k];
+  }
+  for (const k of Object.keys(next)) next[k] = next[k] / total;
+  return next;
+}
+
+export const PORTFOLIO_DISCLAIMER =
+  "Portfólio gerado por análise estatística e preditiva — loterias são aleatórias; desempenho passado não garante resultados futuros.";

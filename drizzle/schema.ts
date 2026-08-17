@@ -476,3 +476,47 @@ export const lotteryWarmupEvents = mysqlTable("lotteryWarmupEvents", {
 }));
 export type LotteryWarmupEvent = typeof lotteryWarmupEvents.$inferSelect;
 export type InsertLotteryWarmupEvent = typeof lotteryWarmupEvents.$inferInsert;
+
+// ---------- Fase 29: portfólio evolutivo de jogos (ex.: 33 jogos da Lotofácil) ----------
+// Portfólios de jogos gerados pelo motor cognitivo, persistidos e ajustados a cada novo sorteio.
+export const lotteryPortfolios = mysqlTable("lotteryPortfolios", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  // megasena / quina / lotofacil / lotomania / timemania
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  // dezenas-alvo que o portfólio deve "cercar" (JSON: [1,2,...,15] ou conjunto maior)
+  targetNumbers: json("targetNumbers").notNull(),
+  // os jogos do portfólio (JSON: [{numbers:[...]}])
+  games: json("games").notNull(),
+  // pesos cognitivos usados na última geração (json: {lstm, statistical, warmup, anomaly, exploration})
+  cognitiveWeights: json("cognitiveWeights").$defaultFn(() => null),
+  // semente evolutiva — muda a cada regeneração para derivar jogos diferentes
+  evolutionSeed: int("evolutionSeed").default(0).notNull(),
+  // número do último sorteio conferido contra o portfólio
+  lastDrawChecked: int("lastDrawChecked").$type<number | null>().default(null),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  uniqUserType: uniqueIndex("uniq_portfolio_user_type").on(t.userId, t.lotteryType),
+}));
+
+// Histórico de acertos do portfólio por sorteio — base da evolução dos pesos.
+export const lotteryPortfolioEvolution = mysqlTable("lotteryPortfolioEvolution", {
+  id: int("id").autoincrement().primaryKey(),
+  portfolioId: int("portfolioId").notNull(),
+  // concurso conferido
+  drawNumber: int("drawNumber").notNull(),
+  // melhor número de acertos entre os jogos (0-15)
+  bestHits: int("bestHits").default(0).notNull(),
+  // distribuição de acertos por jogo ({hits11:0, hits12:..., hits15:...})
+  hitsDist: json("hitsDist").$defaultFn(() => null),
+  // número de jogos com 13+, 14, 15 acertos
+  hits13Plus: int("hits13Plus").default(0).notNull(),
+  hits14: int("hits14").default(0).notNull(),
+  hits15: int("hits15").default(0).notNull(),
+  // pesos cognitivos vigentes na conferência
+  weightsSnapshot: json("weightsSnapshot").$defaultFn(() => null),
+  checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+}, (t) => ({
+  idxEvolutionPortfolio: index("idx_evolution_portfolio").on(t.portfolioId),
+}));

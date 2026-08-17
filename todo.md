@@ -493,3 +493,15 @@ Router lines: 356 warmupHistory, 385 simulateBet, 401 weeklyReport, lstmBet ~424
 3. L105: simResult query usa LOTTERY_SIZES antes da declaração (const está na linha ~143) → mover LOTTERY_SIZES/LOTTERY_MAX para o topo do componente (após imports constantes do módulo? Melhor: mover as consts para fora do componente, nível módulo, junto com LOTTERY_COLORS/LOTTERY_LABELS).
 4. L168: utils.loterias.warmupHistory.invalidate() → mutation, inválido. Remover esse invalidate (o query allWarmupHistory se invalida sozinho via utils.loterias.warmupEvents.invalidate()).
 5. L877/883: parâmetro e implicit any no .map sobre (allWarmupHistory?.events ?? []) — tipar explicitamente.
+
+## Fase 29 — Portfólio evolutivo Lotofácil (33 jogos, metas 13/14/15 pontos)
+- [ ] Engine `lotofacilPortfolio(type, targetNumbers, options)` em server/nexus-loterias.ts: gera 33 jogos de 15 dezenas cobrindo o alvo com pesos cognitivos (LSTM + estatístico + warmup + anomalias/entropia)
+- [ ] Camada de detecção de anomalias: paridade, soma, repetição do concurso anterior, dezenas de borda, sequências (heurísticas anti-padrão + detecção de anomalia estatística)
+- [ ] Portfólio persistente: tabela lotteryPortfolios (userId, lotteryType, games JSON, targetNumbers, createdAt, updatedAt, lastDrawChecked) — Migration 0023
+- [ ] Backend: conferir portfólio contra novo sorteio, evoluir pesos (reforço do que acertou 13+/acerto por jogo) e regenerar 33 jogos automaticamente
+- [ ] Histórico de evolução: tabela lotteryPortfolioEvolution (portfolioId, drawNumber, bestHits, hitsDist 11-15, generatedAt) + endpoint loterias.portfolioEvolution
+- [ ] Router: loterias.generatePortfolio (gerar/regenerar com evolução), loterias.checkPortfolio (conferir contra último sorteio + evoluir), loterias.listPortfolios, loterias.portfolioEvolution
+- [ ] Coleta automática Lotofácil (60 concursos) para alimentar o motor (dados reais Caixa)
+- [ ] Frontend: painel "Portfólio Lotofácil" na página /loterias — 15 dezenas-alvo clicáveis, 33 jogos em grade, metas 13/14/15, cobertura por dezena, dist de acertos, botão "Evoluir portfólio" (aplica novo sorteio)
+- [ ] Vitest coverage da Fase 29 (engine pura + conferência + evolução)
+- [ ] README + todo.md seção Fase 29, checkpoint + GitHub sync

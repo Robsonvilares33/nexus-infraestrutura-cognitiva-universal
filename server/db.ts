@@ -10,6 +10,7 @@ import {
   pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
   lotteryDraws, lotteryBets, lotteryAlerts,
   lotteryCollectJobs, lotteryModels, lotteryWarmupEvents,
+  lotteryPortfolios, lotteryPortfolioEvolution,
   type WebhookEvent,
   type InsertUser, type InsertProjectShare, type InsertLotteryDraw,
   type InsertLotteryBet, type InsertLotteryAlert,
@@ -2132,4 +2133,131 @@ export async function listLotteryWarmupEvents(type?: string, limit: number = 60)
     .orderBy(desc(lotteryWarmupEvents.detectedAt), desc(lotteryWarmupEvents.id))
     .limit(limit);
   return rows as LotteryWarmupEventRow[];
+}
+
+// ---------- Fase 29: portfólio evolutivo de jogos ----------
+export type LotteryPortfolioRow = {
+  id: number;
+  userId: number;
+  lotteryType: string;
+  targetNumbers: number[];
+  games: Array<{ numbers: number[] }>;
+  cognitiveWeights: Record<string, number> | null;
+  evolutionSeed: number;
+  lastDrawChecked: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+/** Salva (ou atualiza) o portfólio do usuário para um tipo de loteria (upsert por usuário+tipo). */
+export async function upsertLotteryPortfolio(
+  userId: number,
+  lotteryType: string,
+  data: { targetNumbers: number[]; games: Array<{ numbers: number[] }>; cognitiveWeights: Record<string, number> | null; evolutionSeed: number },
+): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const existing = await db
+    .select({ id: lotteryPortfolios.id })
+    .from(lotteryPortfolios)
+    .where(and(eq(lotteryPortfolios.userId, userId), eq(lotteryPortfolios.lotteryType, lotteryType)))
+    .limit(1);
+  if (existing[0]) {
+    await db
+      .update(lotteryPortfolios)
+      .set({ ...data, updatedAt: new Date() } as typeof lotteryPortfolios.$inferInsert)
+      .where(eq(lotteryPortfolios.id, existing[0].id))
+      .execute();
+    return existing[0].id;
+  }
+  const res = await db
+    .insert(lotteryPortfolios)
+    .values({ userId, lotteryType, ...data } as typeof lotteryPortfolios.$inferInsert)
+    .execute();
+  const header = Array.isArray(res) ? res[0] : res;
+  return Number((header as { insertId?: number }).insertId ?? 0);
+}
+
+export async function listLotteryPortfolios(userId: number): Promise<LotteryPortfolioRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryPortfolios.id,
+      userId: lotteryPortfolios.userId,
+      lotteryType: lotteryPortfolios.lotteryType,
+      targetNumbers: lotteryPortfolios.targetNumbers,
+      games: lotteryPortfolios.games,
+      cognitiveWeights: lotteryPortfolios.cognitiveWeights,
+      evolutionSeed: lotteryPortfolios.evolutionSeed,
+      lastDrawChecked: lotteryPortfolios.lastDrawChecked,
+      createdAt: lotteryPortfolios.createdAt,
+      updatedAt: lotteryPortfolios.updatedAt,
+    })
+    .from(lotteryPortfolios)
+    .where(eq(lotteryPortfolios.userId, userId))
+    .orderBy(desc(lotteryPortfolios.updatedAt))
+    .limit(10);
+  return rows as LotteryPortfolioRow[];
+}
+
+export type LotteryPortfolioEvolutionRow = {
+  id: number;
+  portfolioId: number;
+  drawNumber: number;
+  bestHits: number;
+  hitsDist: Record<string, number> | null;
+  hits13Plus: number;
+  hits14: number;
+  hits15: number;
+  weightsSnapshot: Record<string, number> | null;
+  checkedAt: Date;
+};
+
+export async function insertLotteryPortfolioEvolution(
+  portfolioId: number,
+  drawNumber: number,
+  data: { bestHits: number; hitsDist: Record<string, number> | null; hits13Plus: number; hits14: number; hits15: number; weightsSnapshot: Record<string, number> | null },
+): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const res = await db
+    .insert(lotteryPortfolioEvolution)
+    .values({ portfolioId, drawNumber, ...data } as typeof lotteryPortfolioEvolution.$inferInsert)
+    .execute();
+  const header = Array.isArray(res) ? res[0] : res;
+  return Number((header as { insertId?: number }).insertId ?? 0);
+}
+
+export async function listLotteryPortfolioEvolution(portfolioId: number, limit: number = 60): Promise<LotteryPortfolioEvolutionRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryPortfolioEvolution.id,
+      portfolioId: lotteryPortfolioEvolution.portfolioId,
+      drawNumber: lotteryPortfolioEvolution.drawNumber,
+      bestHits: lotteryPortfolioEvolution.bestHits,
+      hitsDist: lotteryPortfolioEvolution.hitsDist,
+      hits13Plus: lotteryPortfolioEvolution.hits13Plus,
+      hits14: lotteryPortfolioEvolution.hits14,
+      hits15: lotteryPortfolioEvolution.hits15,
+      weightsSnapshot: lotteryPortfolioEvolution.weightsSnapshot,
+      checkedAt: lotteryPortfolioEvolution.checkedAt,
+    })
+    .from(lotteryPortfolioEvolution)
+    .where(eq(lotteryPortfolioEvolution.portfolioId, portfolioId))
+    .orderBy(desc(lotteryPortfolioEvolution.checkedAt), desc(lotteryPortfolioEvolution.id))
+    .limit(limit);
+  return rows as LotteryPortfolioEvolutionRow[];
+}
+
+export async function updateLotteryPortfolioLastDrawChecked(portfolioId: number, drawNumber: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(lotteryPortfolios)
+    .set({ lastDrawChecked: drawNumber, updatedAt: new Date() } as typeof lotteryPortfolios.$inferInsert)
+    .where(eq(lotteryPortfolios.id, portfolioId))
+    .execute();
 }
