@@ -285,3 +285,27 @@
 - [x] README.md com seção Fase 22 (tabela de capacidades, coleta agendada, aviso estatístico)
 - [x] Heartbeat diário criado na plataforma (task_uid 2Lj4n6k86t6tJerNN9xnqF, cron 14:05 UTC) e callback em produção validado (403 sem cookie cron = autenticação OK)
 - [x] Sync GitHub: push direto bloqueado pelo GITHUB PUSH PROTECTION (GH013 — remote aceita apenas commits verificados); sincronização deve ser feita via Management UI (Settings → GitHub → Export code / card "Sincronizar esta prévia"), caminho validado nas Fases 15–21. Usuário orientado a usar o botão de sincronização para abrir o PR #11 da Fase 22
+
+## Fase 23: Loterias NEXUS — conferência, alertas e missões preditivas
+
+- [x] Schema: tabelas `lotteryBets` (userId, loteria, concurso previsto 0=mais recente, dezenas json, hits, checked) e `lotteryAlerts` (userId, loteria, limiar BRL, enabled, lastNotifiedDraw) — Migration 0020 aplicada
+- [x] Backend: procedimentos tRPC de apostas (latestDraw, saveBet, listBets com auto-conferência, getAlerts, setAlert, removeAlert — protected)
+- [x] Backend: conferência automática no collect diário (`/api/scheduled/loterias-collect` confere apostas pendentes e notifica in-app acertos ≥4 dezenas)
+- [x] Backend: alerta de acumulado — limiar por loteria + notificação via notifyOwner quando acumulado (ou próximo estimado) ultrapassa o limiar, com antirrepetição por concurso
+- [x] Backend: integração chat multiagente — `multiAgentChat` detecta perguntas de loteria (isLotteryRelated) e injeta buildLotteryStatsContext no system prompt
+- [x] Frontend: painel "Minhas Apostas" na página /loterias (apostas salvas, hits conferidos, badge aguardando conferência) + botão "Salvar aposta" nas geradas
+- [x] Frontend: configuração de alerta de acumulado (painel com badges de limiar, dialog com Input, remover)
+- [x] Vitest coverage da Fase 23 (26/26 em nexus-loterias.test.ts: conferência, parseBRL, avaliação de alertas, isLotteryRelated, contexto do chat)
+- [x] README.md com seção Fase 23 (tabela de capacidades + aviso estatístico + testes)
+- [ ] Checkpoint + sincronização com o GitHub (Management UI: Settings → GitHub / card "Sincronizar esta prévia")
+
+### Progresso Fase 23 (contexto de retomada)
+Feito até agora: Migration 0020 aplicada (tabela lotteryBets + lotteryAlerts no DB); schema.ts com lotteryBets (userId, lotteryType, drawNumber, numbers json, hits, checked) e lotteryAlerts (userId, lotteryType, thresholdBRL, enabled, lastNotifiedDraw); db.ts com helpers: insertLotteryBet, listLotteryBets, updateLotteryBet, listPendingBets, upsertLotteryAlert, listLotteryAlerts, updateLotteryAlert, deleteLotteryAlert (falta criar este último no db.ts); nexus-loterias.ts com checkBetHits, parseBRL, evaluateAccumulatedAlert; router loterias.ts com latestDraw, saveBet, listBets (auto-confere), getAlerts, setAlert, removeAlert (protectedProcedure).
+Pendente: adicionar deleteLotteryAlert no db.ts (import de delete do drizzle-orm eq), integrar conferência+alerta no callback /api/scheduled/loterias-collect em server/_core/index.ts (importar notification API), integrar loterias como fonte no chat multiagente (ver server/routers.ts chat/agent), frontend painel Minhas Apostas + alertas em /loterias, vitest Fase 23 (testar engine puro + router com ctx mock), README, checkpoint, GitHub sync (Management UI Settings→GitHub; git push direto bloqueado por GH013 PUSH PROTECTION).
+Notificação: usar sendOwnerNotification do server/_core/notification.ts (ver exports existentes).
+
+### Progresso Fase 23 (retomada pós-compação — atualizar antes de checkpoint)
+Backend 100%: Migration 0020 aplicada (lotteryBets + lotteryAlerts no DB); schema.ts OK; db.ts helpers OK (incl. deleteLotteryAlert com drizzleEq); nexus-loterias.ts com checkBetHits, parseBRL, evaluateAccumulatedAlert, buildLotteryStatsContext, isLotteryRelated; router loterias.ts com latestDraw/saveBet/listBets(getAlerts/setAlert/removeAlert); callback /api/scheduled/loterias-collect em server/_core/index.ts confere apostas + alerta acumulado com notifyOwner (import correto: ../../drizzle/schema). tsc limpo.
+Frontend em andamento: Loterias.tsx — hooks de Fase 23 já adicionados (listBets, getAlerts, latestDraw, saveBet/setAlert/removeAlert mutations, handlers handleSaveBet/handleSetAlert/handleRemoveAlert, dialogs estados betDialogOpen/alertDialogOpen). FALTA: (1) JSX: seção "Minhas apostas" (tabela com hits), painel alertas (card com badges + botão "Alerta de acumulado" + dialog com Input), botão "Salvar aposta" nas apostas geradas (handleSaveBet), e (2) marcar itens todo.md, vitest Fase 23 (router mocks, engine puro), README, checkpoint, GitHub sync via Management UI (push direto bloqueado GH013).
+Chat: integração feita em nexus-multichat.ts (multiAgentChat injeta lotteryContext via isLotteryRelated + buildLotteryStatsContext para megasena).
+Nota: tsc watch log mostra erros antigos (module not found) — ignorar, cache do watcher.

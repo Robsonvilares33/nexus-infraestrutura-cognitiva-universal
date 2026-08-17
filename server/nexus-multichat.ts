@@ -92,6 +92,20 @@ export async function multiAgentChat(
   input: { message: string; agent?: string; history?: { role: "user" | "assistant"; content: string }[] },
 ): Promise<MultiAgentChatResult> {
   const agentName = input.agent && input.agent !== "all" ? input.agent : "";
+  // Fase 23: estatísticas oficiais das loterias como fonte de dados do chat
+  // (apenas quando a pergunta menciona loterias; não bloqueia a resposta)
+  let lotteryContext = "";
+  try {
+    const { isLotteryRelated } = await import("./nexus-loterias");
+    if (isLotteryRelated(input.message)) {
+      const { buildLotteryStatsContext, computeStats } = await import("./nexus-loterias");
+      const { listLotteryDraws } = await import("./db");
+      const rows = await listLotteryDraws("megasena", 500);
+      if (rows.length > 0) {
+        lotteryContext = buildLotteryStatsContext(computeStats("megasena", rows as any));
+      }
+    }
+  } catch { /* contexto de loterias é opcional */ }
   const [systemPrompt, ragContext] = await Promise.all([
     buildAgentSystemPrompt(agentName),
     input.message.trim() ? buildRagContext(userId, input.message.trim()) : Promise.resolve(""),
@@ -102,8 +116,9 @@ export async function multiAgentChat(
     content: h.content,
   }));
 
+  const systemContent = [systemPrompt, ragContext, lotteryContext].filter(Boolean).join("\n\n---\n");
   const messages: InvokeParams["messages"] = [
-    { role: "system" as const, content: ragContext ? `${systemPrompt}\n\n---\n${ragContext}` : systemPrompt },
+    { role: "system" as const, content: systemContent },
     ...history,
     { role: "user" as const, content: input.message.trim() },
   ];

@@ -383,3 +383,87 @@ export function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// ---------- Fase 23: conferência de apostas e alertas de acumulado ----------
+
+export interface CheckedBet {
+  id: number;
+  drawNumber: number;
+  numbers: number[];
+  drawn: number[] | null; // dezenas oficiais (null = concurso ainda não coletado)
+  hits: number | null;
+  drawDate: string | null;
+}
+
+/**
+ * Confere uma aposta contra as dezenas oficiais de um concurso.
+ * Pura — testável sem banco.
+ */
+export function checkBetHits(betNumbers: number[], drawnNumbers: number[] | null): number | null {
+  if (!drawnNumbers) return null;
+  if (!validateNumbers("megasena", betNumbers)) return null;
+  const drawnSet = new Set(drawnNumbers);
+  return betNumbers.filter((n) => drawnSet.has(n)).length;
+}
+
+/** Converte valor monetário da Caixa ("1.234.567,89") para número (float). */
+export function parseBRL(value: string): number {
+  if (!value) return 0;
+  const cleaned = String(value).replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Avalia alertas de acumulado de um usuário contra o último sorteio coletado.
+ * Retorna os alertas que dispararam notificação (e devem ter lastNotifiedDraw atualizado).
+ * Pura em relação ao banco — recebe alerts e o sorteio mais recente.
+ */
+export function evaluateAccumulatedAlert(
+  alerts: { id: number; lotteryType: string; thresholdBRL: string; enabled: number; lastNotifiedDraw: number }[],
+  draw: { drawNumber: number; accumulatedPrize: string | null; estimatedNextPrize: string | null },
+): { id: number; lotteryType: string; drawNumber: number; accumulated: number; estimatedNext: number }[] {
+  const accumulated = parseBRL(draw.accumulatedPrize ?? "");
+  const estimatedNext = parseBRL(draw.estimatedNextPrize ?? "");
+  return alerts
+    .filter((a) => a.enabled === 1 && a.lastNotifiedDraw < draw.drawNumber)
+    .filter((a) => {
+      const threshold = parseBRL(a.thresholdBRL);
+      return accumulated > threshold || (accumulated === 0 && estimatedNext > threshold);
+    })
+    .map((a) => ({ id: a.id, lotteryType: a.lotteryType, drawNumber: draw.drawNumber, accumulated, estimatedNext }));
+}
+
+// ---------- Fase 23: contexto de loterias para o chat multiagente ----------
+
+/**
+ * Constrói um contexto textual compacto das estatísticas de loterias para
+ * injetar no chat multiagente quando a pergunta do usuário menciona loterias.
+ * Usa dados do banco (não faz rede) — chama a partir de multiAgentChat.
+ */
+export function buildLotteryStatsContext(stats: DrawStats): string {
+  const label = LOTTERY_LABELS[stats.type as LotteryType] ?? stats.type;
+  const lines: string[] = [
+    `Dados oficiais da Caixa (Loterias NEXUS) — ${label}:`,
+    `- Último concurso coletado: ${stats.latestDraw}; período: ${stats.dateRange.first ?? "?"} a ${stats.dateRange.last ?? "?"}`,
+    `- Acumulado atual: R$ ${stats.latestAccumulated}; próximo estimado: R$ ${stats.estimatedNext}`,
+    `- Dezenas mais frequentes (últimos ${stats.totalDraws} concursos): ${stats.hot.slice(0, 10).join(", ")}`,
+    `- Dezenas em maior atraso: ${stats.delayed.slice(0, 10).join(", ")}`,
+    `- Pares mais comuns: ${stats.commonPairs.slice(0, 5).map((p) => `[${p.pair.join(", ")}] x${p.count}`).join("; ")}`,
+    `- Últimos 5 sorteios: ${stats.lastDraws.slice(-5).map((d) => `#${d.drawNumber} [${d.numbers.join(", ")}]`).join(" | ")}`,
+  ];
+  return lines.join("\n") + "\n\nIMPORTANTE: sorteios são aleatórios — estatísticas não garantem acerto. Sempre mencione esse disclaimer ao usuário.";
+}
+
+/** Detecta se a mensagem do usuário menciona loterias. */
+export function isLotteryRelated(message: string): boolean {
+  const lower = message.toLowerCase();
+  const tokens = [
+    "loteria", "loterias", "lotofácil", "lotofacil", "megasena", "mega sena",
+    "quina", "lotomania", "timemania", "concurso", "aposta", "apostas",
+    "dezenas", "acumul", "sorteio", "sorteios",
+  ];
+  return tokens.some((t) => lower.includes(t));
+}
+
+export type LotteryStats = DrawStats;

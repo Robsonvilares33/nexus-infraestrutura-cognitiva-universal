@@ -141,6 +141,13 @@
       "when": 1786927929081,
       "tag": "0019_wooden_blue_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1786931326881,
+      "tag": "0020_regular_excalibur",
+      "breakpoints": true
     }
   ]
 }

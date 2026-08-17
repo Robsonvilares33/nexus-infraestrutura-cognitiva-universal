@@ -1,15 +1,17 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
-import { countLotteryDraws, insertLotteryDraw, listLotteryDraws } from "../db";
+import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listLotteryAlerts, listLotteryBets, listLotteryDraws, updateLotteryBet, upsertLotteryAlert } from "../db";
 import {
   COLLECT_LIMITS,
   LOTTERY_LABELS,
   LOTTERY_TYPES,
   type LotteryType,
+  checkBetHits,
   collectAndPersist,
   computeStats,
   generateStatisticalBet,
+  validateNumbers,
 } from "../nexus-loterias";
 
 // Coleção em andamento (uma coleta por processo, simples)
@@ -113,6 +115,92 @@ export const loteriasRouter = router({
       );
       return { bets, disclaimer: "Análise estatística apenas — sorteios são aleatórios e não há garantia de acerto." };
     }),
+
+  // ---------- Fase 23: apostas salvas + conferência + alertas ----------
+
+  // Info do concurso mais recente por loteria (para conferência de apostas)
+  latestDraw: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES) }))
+    .query(async ({ input }) => {
+      const rows = await listLotteryDraws(input.type, 1);
+      return rows.length > 0 ? rows[rows.length - 1] : null;
+    }),
+
+  // Salvar aposta do usuário (drawNumber 0 = conferir contra o concurso mais recente quando sair)
+  saveBet: protectedProcedure
+    .input(
+      z.object({
+        type: z.enum(LOTTERY_TYPES),
+        drawNumber: z.number().int().min(0),
+        numbers: z.array(z.number().int().min(1).max(100)),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!validateNumbers(input.type as LotteryType, input.numbers)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Dezenas inválidas para esta loteria (range ou quantidade)." });
+      }
+      await insertLotteryBet({
+        userId: ctx.user.id,
+        lotteryType: input.type as LotteryType,
+        drawNumber: input.drawNumber,
+        numbers: input.numbers,
+        hits: null,
+        checked: 0,
+      });
+      return { saved: true };
+    }),
+
+  // Listar apostas do usuário em uma loteria (confere automaticamente as pendentes)
+  listBets: protectedProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES) }))
+    .query(async ({ input, ctx }) => {
+      const pending = await listLotteryBets(ctx.user.id, input.type);
+      const unchecked = pending.filter((b) => b.checked === 0);
+      // desenhar os concursos conhecidos para conferência em lote
+      const drawRows = await listLotteryDraws(input.type, 2000);
+      const byDraw = new Map<number, (typeof drawRows)[number]>();
+      for (const d of drawRows) byDraw.set(d.drawNumber, d);
+      for (const b of unchecked) {
+        const target = b.drawNumber === 0 ? drawRows[drawRows.length - 1]?.drawNumber ?? 0 : b.drawNumber;
+        const draw = target > 0 ? byDraw.get(target) : null;
+        if (!draw) continue;
+        const hits = checkBetHits(b.numbers as number[], draw.numbers as number[]);
+        if (hits !== null) {
+          await updateLotteryBet(b.id, { hits, checked: 1 });
+        }
+      }
+      return listLotteryBets(ctx.user.id, input.type);
+    }),
+
+  // Alertas de acumulado do usuário
+  getAlerts: protectedProcedure.query(async ({ ctx }) => listLotteryAlerts(ctx.user.id)),
+
+  // Salvar/atualizar alerta de acumulado
+  setAlert: protectedProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES), thresholdBRL: z.string().min(1).max(20) }))
+    .mutation(async ({ input, ctx }) => {
+      const value = parseAlertThreshold(input.thresholdBRL);
+      if (value === null) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Limiar inválido — use número em reais, ex.: 10000000 ou 10.000.000." });
+      }
+      await upsertLotteryAlert(ctx.user.id, input.type, String(value), 1);
+      return { saved: true, threshold: String(value) };
+    }),
+
+  // Remover alerta de acumulado
+  removeAlert: protectedProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES) }))
+    .mutation(async ({ input, ctx }) => {
+      await deleteLotteryAlert(ctx.user.id, input.type);
+      return { removed: true };
+    }),
 });
+
+function parseAlertThreshold(v: string): number | null {
+  const cleaned = v.replace(/[^0-9.,]/g, "").replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(cleaned);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
 
 export type LoteriasRouter = typeof loteriasRouter;

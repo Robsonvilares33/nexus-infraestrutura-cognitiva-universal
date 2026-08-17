@@ -382,3 +382,40 @@ export const lotteryDraws = mysqlTable("lotteryDraws", {
 }));
 export type LotteryDraw = typeof lotteryDraws.$inferSelect;
 export type InsertLotteryDraw = typeof lotteryDraws.$inferInsert;
+
+// Fase 23: apostas salvas do usuário com conferência automática contra lotteryDraws
+export const lotteryBets = mysqlTable("lotteryBets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  // megasena / quina / lotofacil / lotomania / timemania
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  // concurso previsto (0 = concurso mais recente / pendente de conferência)
+  drawNumber: int("drawNumber").notNull(),
+  // dezenas apostadas (JSON: [4, 15, 17, 40, 55, 58])
+  numbers: json("numbers").notNull(),
+  // hits conferidos contra o resultado oficial (null = ainda não conferido)
+  hits: int("hits"),
+  checked: int("checked").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  idxUser: index("idx_user").on(t.userId),
+  idxUserType: index("idx_user_type").on(t.userId, t.lotteryType),
+}));
+export type LotteryBet = typeof lotteryBets.$inferSelect;
+export type InsertLotteryBet = typeof lotteryBets.$inferInsert;
+
+// Fase 23: limiar de alerta de acumulado por loteria (por usuário)
+export const lotteryAlerts = mysqlTable("lotteryAlerts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  // limiar em R$ (string para preservar decimais, ex.: "10000000")
+  thresholdBRL: varchar("thresholdBRL", { length: 20 }).notNull(),
+  enabled: int("enabled").default(1).notNull(),
+  lastNotifiedDraw: int("lastNotifiedDraw").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  uniqAlert: uniqueIndex("uniq_alert").on(t.userId, t.lotteryType),
+}));
+export type LotteryAlert = typeof lotteryAlerts.$inferSelect;
+export type InsertLotteryAlert = typeof lotteryAlerts.$inferInsert;

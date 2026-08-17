@@ -238,3 +238,22 @@ Aviso: a análise é **puramente estatística descritiva** — sorteios de loter
 ### Configuração
 
 Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (18/18: validação de dezenas por loteria, frequência, atraso, pares comuns, acumulados, PRNG determinístico e limites do gerador) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).
+
+## Fase 23: Loterias NEXUS — conferência de apostas, alertas de acumulado e chat com dados oficiais
+
+Evolução do módulo de loterias: o usuário agora salva suas apostas, confere automaticamente os acertos contra os concursos coletados, recebe notificações de acumulados que ultrapassam um limiar configurável, e o chat multiagente usa as estatísticas oficiais como fonte de dados.
+
+| Capacidade | Descrição |
+|---|---|
+| Apostas salvas | Tabela `lotteryBets` (user, loteria, concurso, dezenas, hits, checked). Concurso `0` = conferir contra o concurso mais recente quando for coletado |
+| Conferência automática | O callback diário `/api/scheduled/loterias-collect` confere todas as apostas pendentes da loteria recém-coletada (`checkBetHits`) e marca `checked=1`; a página `/loterias` também confere as pendentes ao abrir (`listBets`) |
+| Notificação de acertos | Acertos com 4+ dezenas disparam notificação in-app ao dono da aposta via `notifyOwner` |
+| Alertas de acumulado | Tabela `lotteryAlerts` (user, loteria, limiar em BRL, `lastNotifiedDraw`). Avaliados a cada coleta diária; notificação quando o acumulado atual (ou o próximo estimado, se acumulado zerado) ultrapassa o limiar; antirrepetição por concurso via `lastNotifiedDraw` |
+| Chat com dados oficiais | `multiAgentChat` detecta perguntas sobre loterias (`isLotteryRelated`) e injeta `buildLotteryStatsContext` (frequência, atraso, pares, acumulados e últimos sorteios) no system prompt do agente, junto do RAG da Super Memória |
+| Frontend `/loterias` | Painel "Alertas de acumulado" (badges com valor, configurar/remover) e painel "Minhas apostas" (status aguardando conferência / N acertos); botão "Salvar aposta" nas apostas geradas |
+
+Aviso: a análise é **puramente estatística descritiva** — sorteios são aleatórios e nenhuma análise aumenta a probabilidade de acerto. O disclaimer permanece visível na UI e também é injetado no contexto do chat.
+
+### Configuração
+
+Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (26/26: inclui conferência de apostas, `parseBRL`, avaliação de alertas de acumulado, detecção de perguntas sobre loterias e contexto do chat) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).

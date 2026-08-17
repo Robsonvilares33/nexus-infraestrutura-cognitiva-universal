@@ -9,6 +9,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { setupSocketIO } from "../socket";
+import { lotteryAlerts as alertsSchema } from "../../drizzle/schema";
+import { eq as drizzleEq } from "drizzle-orm";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -245,13 +247,24 @@ async function startServer() {
         const session = await sdk.verifySession(sessionHeader);
         if (!session) return res.status(401).json({ error: "Unauthorized" });
       }
-      const { collectAndPersist } = await import("../nexus-loterias");
-      const { insertLotteryDraw } = await import("../db");
+      const { collectAndPersist, parseBRL } = await import("../nexus-loterias");
+      const { insertLotteryDraw, listPendingBets, updateLotteryBet, getDb } = await import("../db");
       const results: { type: string; collected: number; errors: number; latest: number | null }[] = [];
+      const db = await getDb();
       for (const type of ["megasena", "quina", "lotofacil", "lotomania", "timemania"] as const) {
         try {
-          const r = await collectAndPersist(type, 5, (d) =>
-            insertLotteryDraw({
+          // 1) coleta o concurso mais recente (limit 1 para o job diário)
+          const latestDraws: { drawNumber: number; numbers: number[]; accumulatedPrize: string; estimatedNextPrize: string }[] = [];
+          const r = await collectAndPersist(type, 5, (d) => {
+            if (latestDraws.length === 0 && d.numbers.length > 0) {
+              latestDraws.push({
+                drawNumber: d.drawNumber,
+                numbers: d.numbers as number[],
+                accumulatedPrize: d.accumulatedPrize,
+                estimatedNextPrize: d.estimatedNextPrize,
+              });
+            }
+            return insertLotteryDraw({
               lotteryType: type,
               drawNumber: d.drawNumber,
               drawDate: d.drawDate,
@@ -259,9 +272,60 @@ async function startServer() {
               accumulatedPrize: d.accumulatedPrize,
               estimatedNextPrize: d.estimatedNextPrize,
               winners: d.winners,
-            }),
-          );
+            });
+          });
           results.push({ type, collected: r.collected, errors: r.errors, latest: r.latest });
+          // 2) Fase 23: confere apostas pendentes da loteria contra o concurso coletado
+          const latestDraw = latestDraws.length > 0 ? latestDraws[0] : null;
+          if (latestDraw) {
+            const pending = await listPendingBets(type);
+            for (const bet of pending) {
+              const target = bet.drawNumber === 0 ? latestDraw.drawNumber : bet.drawNumber;
+              if (target !== latestDraw.drawNumber) continue;
+              const drawnSet = new Set(latestDraw.numbers);
+              const hits = bet.numbers.filter((n: number) => drawnSet.has(n)).length;
+              await updateLotteryBet(bet.id, { hits, checked: 1 });
+              // notifica o dono da aposta (in-app) se houve acerto de destaque
+              if (hits >= 4) {
+                try {
+                  const { notifyOwner } = await import("./notification");
+                  await notifyOwner({
+                    title: `🍀 Loterias NEXUS: aposta com ${hits} acertos`,
+                    content: `Sua aposta da loteria ${type} no concurso ${latestDraw.drawNumber} acertou ${hits} dezenas: [${bet.numbers.join(", ")}]. Resultado oficial: [${latestDraw.numbers.join(", ")}].`,
+                  });
+                } catch { /* notificação não crítica */ }
+              }
+            }
+            // 3) Fase 23: alertas de acumulado — notifica usuários com limiar ultrapassado
+            if (db) {
+              try {
+                const alerts = await db.select({
+                  id: alertsSchema.id,
+                  userId: alertsSchema.userId,
+                  lotteryType: alertsSchema.lotteryType,
+                  thresholdBRL: alertsSchema.thresholdBRL,
+                  lastNotifiedDraw: alertsSchema.lastNotifiedDraw,
+                }).from(alertsSchema)
+                  .where(drizzleEq(alertsSchema.lotteryType, type));
+                for (const a of alerts) {
+                  if (a.lastNotifiedDraw >= latestDraw.drawNumber) continue;
+                  const accumulated = parseBRL(latestDraw.accumulatedPrize ?? "");
+                  const estimatedNext = parseBRL(latestDraw.estimatedNextPrize ?? "");
+                  const threshold = parseBRL(a.thresholdBRL);
+                  const over = accumulated > threshold || (accumulated === 0 && estimatedNext > threshold);
+                  if (!over) continue;
+                  try {
+                    const { notifyOwner } = await import("./notification");
+                    await notifyOwner({
+                      title: `💰 Loterias NEXUS: ${type} acumulada`,
+                      content: `O acumulado da ${type} (concurso ${latestDraw.drawNumber}) ultrapassou seu limiar de R$ ${threshold.toLocaleString("pt-BR")}. Acumulado atual: R$ ${accumulated.toLocaleString("pt-BR")}; próximo estimado: R$ ${estimatedNext.toLocaleString("pt-BR")}.`,
+                    });
+                  } catch { /* notificação não crítica */ }
+                  await db.update(alertsSchema).set({ lastNotifiedDraw: latestDraw.drawNumber }).where(drizzleEq(alertsSchema.id, a.id)).execute();
+                }
+              } catch { /* avaliação de alertas não deve falhar a coleta */ }
+            }
+          }
         } catch {
           results.push({ type, collected: 0, errors: 1, latest: null });
         }

@@ -170,3 +170,102 @@ describe("mulberry32", () => {
     expect(seq1.every((v) => v >= 0 && v < 1)).toBe(true);
   });
 });
+
+// ---------- Fase 23: conferência de apostas e alertas ----------
+
+import {
+  buildLotteryStatsContext,
+  checkBetHits,
+  evaluateAccumulatedAlert,
+  isLotteryRelated,
+  parseBRL,
+} from "./nexus-loterias";
+import type { DrawStats, NumberStat } from "./nexus-loterias";
+
+describe("Fase 23 — conferência de apostas", () => {
+  it("conta os acertos corretamente", () => {
+    expect(checkBetHits([3, 10, 20, 30, 40, 50], [10, 20, 30, 55, 56, 57])).toBe(3);
+    expect(checkBetHits([3, 10, 20, 30, 40, 50], [10, 20, 30, 40, 50, 55])).toBe(5);
+    expect(checkBetHits([3, 10, 20, 30, 40, 50], [1, 2, 3, 4, 5, 6])).toBe(1);
+    expect(checkBetHits([3, 10, 20, 30, 40, 50], [3, 10, 20, 30, 40, 50])).toBe(6);
+  });
+
+  it("retorna null sem dezenas sorteadas (concurso ainda não coletado)", () => {
+    expect(checkBetHits([3, 10, 20, 30, 40, 50], null)).toBeNull();
+  });
+
+  it("retorna null para dezenas fora do range da Mega-Sena (1-60) ou vazias", () => {
+    expect(checkBetHits([3, 10, 20, 30, 40, 61], [10, 20, 30, 55, 56, 57])).toBeNull();
+    expect(checkBetHits([], [10, 20, 30, 55, 56, 57])).toBeNull();
+    expect(checkBetHits([3, 10, 20, 30, 40, 50], [10, 20, 30, 55, 56, 57])).toBe(3); // 6 dezenas válidas conta normalmente
+  });
+});
+
+describe("Fase 23 — parseBRL", () => {
+  it("converte formato brasileiro", () => {
+    expect(parseBRL("1.234.567,89")).toBeCloseTo(1234567.89, 1);
+    expect(parseBRL("45.000.000,00")).toBeCloseTo(45000000, 0);
+    expect(parseBRL("0")).toBe(0);
+    expect(parseBRL("")).toBe(0);
+    expect(parseBRL("não é número")).toBe(0);
+  });
+});
+
+describe("Fase 23 — evaluateAccumulatedAlert", () => {
+  const draw = { drawNumber: 10, accumulatedPrize: "30.000.000,00", estimatedNextPrize: "50.000.000,00" };
+
+  it("dispara alertas habilitados com limiar ultrapassado e não repetidos", () => {
+    const fired = evaluateAccumulatedAlert(
+      [
+        { id: 1, lotteryType: "megasena", thresholdBRL: "20000000", enabled: 1, lastNotifiedDraw: 5 },
+        { id: 2, lotteryType: "megasena", thresholdBRL: "100000000", enabled: 1, lastNotifiedDraw: 5 },
+        { id: 3, lotteryType: "megasena", thresholdBRL: "20000000", enabled: 1, lastNotifiedDraw: 10 },
+        { id: 4, lotteryType: "megasena", thresholdBRL: "20000000", enabled: 0, lastNotifiedDraw: 5 },
+      ],
+      draw,
+    );
+    expect(fired.length).toBe(1);
+    expect(fired[0].id).toBe(1);
+  });
+
+  it("dispara com acumulado zerado quando o próximo estimado ultrapassa o limiar", () => {
+    const emptyDraw = { drawNumber: 11, accumulatedPrize: "0", estimatedNextPrize: "60.000.000,00" };
+    const fired = evaluateAccumulatedAlert(
+      [{ id: 5, lotteryType: "megasena", thresholdBRL: "50000000", enabled: 1, lastNotifiedDraw: 0 }],
+      emptyDraw,
+    );
+    expect(fired.length).toBe(1);
+  });
+});
+
+describe("Fase 23 — integração com chat (isLotteryRelated / buildLotteryStatsContext)", () => {
+  it("detecta perguntas sobre loterias", () => {
+    expect(isLotteryRelated("quais os padrões da loteria?")).toBe(true);
+    expect(isLotteryRelated("analise os últimos concursos da Mega-Sena")).toBe(true);
+    expect(isLotteryRelated("o valor do acumulado da Quina aumentou?")).toBe(true);
+    expect(isLotteryRelated("me ajude com um projeto em Python")).toBe(false);
+    expect(isLotteryRelated("receita de bolo")).toBe(false);
+  });
+
+  it("gera contexto textual compacto das estatísticas", () => {
+    const stats: DrawStats = {
+      type: "megasena",
+      totalDraws: 100,
+      dateRange: { first: "2025-01-01", last: "2026-01-01" },
+      latestDraw: 3000,
+      latestAccumulated: "10.000.000,00",
+      estimatedNext: "15.000.000,00",
+      totalAccumulatedCount: 40,
+      frequency: [{ number: 10, frequency: 5, delay: 0 } as NumberStat],
+      hot: [10],
+      cold: [1],
+      delayed: [2],
+      commonPairs: [{ pair: [10, 20] as [number, number], count: 3 }],
+      lastDraws: [{ drawNumber: 3000, drawDate: "2026-01-01", numbers: [1, 2, 3, 4, 5, 6] }],
+    };
+    const ctx = buildLotteryStatsContext(stats);
+    expect(ctx).toContain("Mega-Sena");
+    expect(ctx).toContain("3000");
+    expect(ctx).toContain("sorteios são aleatórios");
+  });
+});

@@ -18,6 +18,8 @@ import {
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -29,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Flame, Loader2, RefreshCw, Snowflake, Timer, TrendingUp } from "lucide-react";
+import { AlertCircle, Bell, Check, Flame, Loader2, RefreshCw, Snowflake, Timer, TrendingUp, Trash2, Wallet } from "lucide-react";
 
 const NEXUS_CYAN = "#7cf3ff";
 const NEXUS_PURPLE = "#c9b8ff";
@@ -61,8 +63,11 @@ export default function Loterias() {
   const [, navigate] = useLocation();
   const [lottery, setLottery] = useState<LotteryType>("megasena");
   const [betCount, setBetCount] = useState<string>("1");
+  // Fase 23: estados de apostas salvas e alertas de acumulado
   const [betDialogOpen, setBetDialogOpen] = useState(false);
   const [generatedBets, setGeneratedBets] = useState<number[][]>([]);
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [alertValue, setAlertValue] = useState("");
 
   const { data: lotteries } = trpc.loterias.list.useQuery();
   const { data: counts, isLoading: countsLoading } = trpc.loterias.counts.useQuery();
@@ -70,6 +75,19 @@ export default function Loterias() {
   const { data: stats, isLoading: statsLoading, error: statsError } = trpc.loterias.stats.useQuery({ type: lottery });
   const { data: draws } = trpc.loterias.draws.useQuery({ type: lottery, limit: 30 });
   const collectMutation = trpc.loterias.collect.useMutation();
+
+  // ---------- Fase 23: apostas salvas + alertas ----------
+
+  const { data: bets, isLoading: betsLoading, refetch: refetchBets } = trpc.loterias.listBets.useQuery(
+    { type: lottery },
+    { enabled: !!user, refetchInterval: 60000 },
+  );
+  const { data: alerts } = trpc.loterias.getAlerts.useQuery(undefined, { enabled: !!user });
+  const { data: latestDraw } = trpc.loterias.latestDraw.useQuery({ type: lottery });
+
+  const saveBetMutation = trpc.loterias.saveBet.useMutation();
+  const setAlertMutation = trpc.loterias.setAlert.useMutation();
+  const removeAlertMutation = trpc.loterias.removeAlert.useMutation();
 
   const isCollecting = collectStatus === "running";
   const hasData = !!stats && stats.totalDraws > 0;
@@ -100,6 +118,43 @@ export default function Loterias() {
       toast.info(res.disclaimer);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Falha ao gerar apostas");
+    }
+  };
+
+  const handleSaveBet = async (numbers: number[]) => {
+    try {
+      await saveBetMutation.mutateAsync({ type: lottery, drawNumber: 0, numbers });
+      toast.success("Aposta salva! Ela será conferida automaticamente quando o concurso sair.");
+      await refetchBets();
+      await utils.loterias.listBets.invalidate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao salvar a aposta");
+    }
+  };
+
+  const handleSetAlert = async () => {
+    if (!alertValue.trim()) {
+      toast.error("Informe o valor do limiar em reais (ex.: 10000000)");
+      return;
+    }
+    try {
+      await setAlertMutation.mutateAsync({ type: lottery, thresholdBRL: alertValue.trim() });
+      toast.success(`Alerta de acumulado salvo — você será notificado quando o prêmio ultrapassar R$ ${alertValue.trim()}.`);
+      setAlertValue("");
+      setAlertDialogOpen(false);
+      await utils.loterias.getAlerts.invalidate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao salvar o alerta");
+    }
+  };
+
+  const handleRemoveAlert = async (type: string) => {
+    try {
+      await removeAlertMutation.mutateAsync({ type: type as LotteryType });
+      toast.info("Alerta removido");
+      await utils.loterias.getAlerts.invalidate();
+    } catch {
+      toast.error("Falha ao remover o alerta");
     }
   };
 
@@ -387,6 +442,93 @@ export default function Loterias() {
             </TabsContent>
           </Tabs>
 
+          {/* Painel de alertas de acumulado (Fase 23) */}
+          <Card className="bg-[#0a0d1a] border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white text-lg flex items-center gap-2">
+                <Bell className="w-5 h-5 text-[#ffd479]" /> Alertas de acumulado
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Você recebe uma notificação quando o acumulado da loteria ultrapassar o valor configurado (verificado a cada atualização diária dos dados).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center gap-3">
+              {alerts ? (
+                <>
+                  {alerts.filter((a) => a.lotteryType === lottery).length === 0 && (
+                    <span className="text-sm text-white/50">Nenhum alerta ativo para {LOTTERY_LABELS[lottery]}.</span>
+                  )}
+                  {alerts
+                    .filter((a) => a.lotteryType === lottery)
+                    .map((a) => (
+                      <Badge key={a.id} variant="outline" className="border-[#ffd479]/40 text-[#ffd479] gap-2">
+                        R$ {formatBRL(a.thresholdBRL)}
+                        <button onClick={() => handleRemoveAlert(a.lotteryType)} className="hover:text-white transition-colors" title="Remover">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </Badge>
+                    ))}
+                </>
+              ) : (
+                <Skeleton className="h-6 w-32 bg-white/10" />
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#ffd479]/40 text-[#ffd479] hover:bg-[#ffd479]/10"
+                onClick={() => setAlertDialogOpen(true)}
+              >
+                Configurar alerta
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Minhas apostas — conferência automática (Fase 23) */}
+          <Card className="bg-[#0a0d1a] border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white text-lg flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-[#7cff9f]" /> Minhas apostas
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Apostas salvas são conferidas automaticamente quando o concurso correspondente é coletado (job diário) ou ao abrir esta página.
+                {latestDraw ? ` Último concurso de ${LOTTERY_LABELS[lottery]}: #${latestDraw.drawNumber}.` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {betsLoading ? (
+                <Skeleton className="h-16 bg-white/5" />
+              ) : !bets || bets.length === 0 ? (
+                <p className="text-sm text-white/50">Nenhuma aposta salva. Gere uma aposta estatística e clique em “Salvar aposta”.</p>
+              ) : (
+                <div className="space-y-2">
+                  {bets.map((b) => (
+                    <div key={b.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                      <span className="text-xs text-white/40">Concurso {b.drawNumber === 0 ? "mais recente" : `#${b.drawNumber}`}</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(b.numbers as number[]).map((n) => (
+                          <span
+                            key={n}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-black"
+                            style={{ background: LOTTERY_COLORS[lottery] || NEXUS_CYAN }}
+                          >
+                            {String(n).padStart(2, "0")}
+                          </span>
+                        ))}
+                      </div>
+                      {b.checked === 1 ? (
+                        <Badge variant="outline" className="border-[#7cff9f]/40 text-[#7cff9f]">
+                          <Check className="w-3 h-3 mr-1" /> {b.hits} acerto{Number(b.hits) === 1 ? "" : "s"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-white/20 text-white/50">Aguardando conferência</Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Gerador de apostas */}
           <Card className="bg-[#0a0d1a] border-white/10">
             <CardHeader>
@@ -439,7 +581,7 @@ export default function Loterias() {
           </DialogHeader>
           <div className="space-y-3">
             {generatedBets.map((bet, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+              <div key={i} className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
                 <span className="text-xs text-white/40 w-8">#{i + 1}</span>
                 <div className="flex flex-wrap gap-1.5">
                   {bet.map((n) => (
@@ -452,8 +594,48 @@ export default function Loterias() {
                     </span>
                   ))}
                 </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto border-[#7cff9f]/40 text-[#7cff9f] hover:bg-[#7cff9f]/10"
+                  onClick={() => handleSaveBet(bet)}
+                >
+                  Salvar aposta
+                </Button>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de alerta de acumulado (Fase 23) */}
+      <Dialog open={alertDialogOpen} onOpenChange={setAlertDialogOpen}>
+        <DialogContent className="bg-[#0a0d1a] border-white/10 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">Alerta de acumulado — {LOTTERY_LABELS[lottery]}</DialogTitle>
+            <DialogDescription className="text-white/50">
+              Você será notificado quando o acumulado ultrapassar o valor definido (conferido a cada coleta diária).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="alert-threshold" className="text-white/70">
+                Limiar em reais (número puro ou formato brasileiro)
+              </Label>
+              <Input
+                id="alert-threshold"
+                className="bg-white/5 border-white/15 text-white"
+                placeholder="Ex.: 10.000.000"
+                value={alertValue}
+                onChange={(e) => setAlertValue(e.target.value)}
+              />
+            </div>
+            <Button
+              className="bg-[#ffd479]/15 text-[#ffd479] border border-[#ffd479]/40 hover:bg-[#ffd479]/25 w-full"
+              onClick={handleSetAlert}
+            >
+              Salvar alerta
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

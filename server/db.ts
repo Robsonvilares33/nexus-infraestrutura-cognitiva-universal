@@ -8,9 +8,10 @@ import {
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
   pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
-  lotteryDraws,
+  lotteryDraws, lotteryBets, lotteryAlerts,
   type WebhookEvent,
-  type InsertUser, type InsertProjectShare, type InsertLotteryDraw
+  type InsertUser, type InsertProjectShare, type InsertLotteryDraw,
+  type InsertLotteryBet, type InsertLotteryAlert
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1841,3 +1842,112 @@ export type LotteryDrawRow = {
   winners: unknown;
   collectedAt: Date;
 };
+
+// Fase 23: apostas do usuário + conferência automática contra lotteryDraws
+export async function insertLotteryBet(bet: InsertLotteryBet): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.insert(lotteryBets).values(bet as typeof lotteryBets.$inferInsert).execute();
+}
+
+export async function listLotteryBets(userId: number, lotteryType: string): Promise<LotteryBetRow[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const rows = await db
+    .select({
+      id: lotteryBets.id,
+      lotteryType: lotteryBets.lotteryType,
+      drawNumber: lotteryBets.drawNumber,
+      numbers: lotteryBets.numbers,
+      hits: lotteryBets.hits,
+      checked: lotteryBets.checked,
+      createdAt: lotteryBets.createdAt,
+    })
+    .from(lotteryBets)
+    .where(and(eq(lotteryBets.userId, userId), eq(lotteryBets.lotteryType, lotteryType)))
+    .orderBy(desc(lotteryBets.id))
+    .limit(100);
+  return rows as LotteryBetRow[];
+}
+
+export async function updateLotteryBet(id: number, patch: Partial<InsertLotteryBet>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.update(lotteryBets).set(patch as any).where(eq(lotteryBets.id, id)).execute();
+}
+
+export async function listPendingBets(lotteryType: string): Promise<LotteryBetRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryBets.id,
+      lotteryType: lotteryBets.lotteryType,
+      drawNumber: lotteryBets.drawNumber,
+      numbers: lotteryBets.numbers,
+      hits: lotteryBets.hits,
+      checked: lotteryBets.checked,
+      createdAt: lotteryBets.createdAt,
+    })
+    .from(lotteryBets)
+    .where(and(eq(lotteryBets.lotteryType, lotteryType), eq(lotteryBets.checked, 0)))
+    .orderBy(asc(lotteryBets.id))
+    .limit(1000);
+  return rows as LotteryBetRow[];
+}
+
+export type LotteryBetRow = {
+  id: number;
+  lotteryType: string;
+  drawNumber: number;
+  numbers: number[];
+  hits: number | null;
+  checked: number;
+  createdAt: Date;
+};
+
+// Fase 23: alertas de acumulado
+export async function upsertLotteryAlert(userId: number, lotteryType: string, thresholdBRL: string, enabled: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.insert(lotteryAlerts)
+    .values({ userId, lotteryType, thresholdBRL, enabled } as typeof lotteryAlerts.$inferInsert)
+    .onDuplicateKeyUpdate({ set: { thresholdBRL, enabled } })
+    .execute();
+}
+
+export async function listLotteryAlerts(userId: number): Promise<LotteryAlertRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryAlerts.id,
+      lotteryType: lotteryAlerts.lotteryType,
+      thresholdBRL: lotteryAlerts.thresholdBRL,
+      enabled: lotteryAlerts.enabled,
+      lastNotifiedDraw: lotteryAlerts.lastNotifiedDraw,
+    })
+    .from(lotteryAlerts)
+    .where(eq(lotteryAlerts.userId, userId));
+  return rows as LotteryAlertRow[];
+}
+
+export async function updateLotteryAlert(id: number, patch: Partial<InsertLotteryAlert>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.update(lotteryAlerts).set(patch as any).where(eq(lotteryAlerts.id, id)).execute();
+}
+
+export type LotteryAlertRow = {
+  id: number;
+  lotteryType: string;
+  thresholdBRL: string;
+  enabled: number;
+  lastNotifiedDraw: number;
+};
+
+export async function deleteLotteryAlert(userId: number, lotteryType: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.delete(lotteryAlerts).where(and(eq(lotteryAlerts.userId, userId), eq(lotteryAlerts.lotteryType, lotteryType))).execute();
+}
