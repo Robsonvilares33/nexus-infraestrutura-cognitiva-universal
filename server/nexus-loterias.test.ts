@@ -344,3 +344,109 @@ describe("Fase 24 — estatísticas pessoais de acertos", () => {
     expect(rows.every((r) => /^\d{2}\/\d{2}\/\d{4}$/.test(r.data))).toBe(true);
   });
 });
+
+// ---------- Fase 25: período, dataset LSTM, treinamento e inferência ----------
+import {
+  buildLstmDataset,
+  blendWithStats,
+  drawsWithinDays,
+  lstmPredict,
+  runLstmTrainingEpoch,
+} from "./nexus-loterias";
+import type { LstmWeights } from "./nexus-loterias";
+
+describe("Fase 25 — drawsWithinDays (filtro de período)", () => {
+  it("mantém apenas sorteios dentro da janela de dias", () => {
+    const now = new Date();
+    const inside = { drawDate: `${now.getDate().toString().padStart(2, "0")}/${(now.getMonth() + 1).toString().padStart(2, "0")}/${now.getFullYear()}` };
+    const old = { drawDate: "01/01/2020" };
+    const noDate = { drawDate: null };
+    expect(drawsWithinDays([inside, old, noDate], 30)).toEqual([inside]);
+    expect(drawsWithinDays([inside], 0)).toEqual([]);
+  });
+
+  it("rejeita formato de data inválido", () => {
+    expect(drawsWithinDays([{ drawDate: "invalida" }], 30)).toEqual([]);
+    expect(drawsWithinDays([{ drawDate: "30/13/2026" }], 30)).toEqual([]);
+  });
+});
+
+describe("Fase 25 — buildLstmDataset", () => {
+  it("gera janelas de sequência com normalização 0..1", () => {
+    const draws = Array.from({ length: 15 }, (_, i) => ({
+      numbers: [1 + i, 2 + i, 3 + i, 4 + i, 5 + i, 6 + i].map((n) => (n % 60) || 60),
+    }));
+    const ds = buildLstmDataset("megasena", draws, 10);
+    expect(ds.inputs.length).toBe(5);
+    expect(ds.inputs[0].length).toBe(10);
+    expect(ds.targets.length).toBe(5);
+    // normalização pelo maxNumber (60)
+    expect(ds.inputs[0][0].every((v) => v > 0 && v <= 1)).toBe(true);
+  });
+
+  it("ignora sorteios com quantidade de dezenas errada", () => {
+    const draws = [{ numbers: [1, 2, 3] }, { numbers: [1, 2, 3, 4, 5, 6] }, { numbers: [1, 2, 3, 4, 5, 6] }];
+    const ds = buildLstmDataset("megasena", draws as any, 2);
+    expect(ds.inputs.length).toBe(0);
+  });
+});
+
+describe("Fase 25 — runLstmTrainingEpoch", () => {
+  const draws = Array.from({ length: 25 }, (_, i) => ({ numbers: [1 + (i % 10), 2 + (i % 10), 3 + (i % 10), 4 + (i % 10), 5 + (i % 10), 6 + (i % 10)] }));
+  const dataset = buildLstmDataset("megasena", draws, 10);
+
+  it("treina uma época e produz pesos válidos no formato LstmWeights", () => {
+    const res = runLstmTrainingEpoch("megasena", dataset, 16, 0.02, null);
+    expect(res.epochs).toBe(1);
+    expect(res.avgLoss).toBeGreaterThan(0);
+    expect(Number.isFinite(res.avgLoss)).toBe(true);
+    expect(res.weights.layers).toHaveLength(1);
+    expect(res.weights.dense.W).toHaveLength(60);
+    expect(res.weights.maxNumber).toBe(60);
+  });
+
+  it("retoma de pesos anteriores incrementando épocas", () => {
+    const a = runLstmTrainingEpoch("megasena", dataset, 16, 0.02, null);
+    const b = runLstmTrainingEpoch("megasena", dataset, 16, 0.02, { layers: a.weights.layers, dense: a.weights.dense, epochs: a.epochs });
+    expect(b.epochs).toBe(2);
+    expect(Number.isFinite(b.avgLoss)).toBe(true);
+  });
+});
+
+describe("Fase 25 — lstmPredict", () => {
+  function makeWeights(): LstmWeights {
+    const res = runLstmTrainingEpoch("megasena", buildLstmDataset("megasena", Array.from({ length: 25 }, (_, i) => ({ numbers: [1 + (i % 10), 2 + (i % 10), 3 + (i % 10), 4 + (i % 10), 5 + (i % 10), 6 + (i % 10)] })), 10), 16, 0.02, null);
+    return res.weights;
+  }
+
+  it("prediz exatamente o tamanho do sorteio com dezenas em range crescente", () => {
+    const weights = makeWeights();
+    const history = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12], [13, 14, 15, 16, 17, 18]];
+    const pred = lstmPredict(weights, history);
+    expect(pred.numbers).toHaveLength(6);
+    expect(pred.numbers.every((n) => n >= 1 && n <= 60)).toBe(true);
+    expect(pred.confidence).toBeGreaterThanOrEqual(0);
+    expect(pred.confidence).toBeLessThanOrEqual(1);
+    expect([...pred.numbers]).toEqual(pred.numbers.sort((a, b) => a - b));
+  });
+
+  it("é determinístico com o mesmo histórico e pesos", () => {
+    const weights = makeWeights();
+    const history = [[1, 2, 3, 4, 5, 6]];
+    expect(lstmPredict(weights, history).numbers).toEqual(lstmPredict(weights, history).numbers);
+  });
+});
+
+describe("Fase 25 — blendWithStats", () => {
+  it("mistura aposta LSTM e estatística preservando o tamanho do sorteio", () => {
+    const blended = blendWithStats([3, 10, 20, 30, 40, 50], [1, 2, 3, 4, 5, 6], 0.5);
+    expect(blended).toHaveLength(6);
+    expect(blended).toContain(3); // presente nas duas
+    expect([...blended]).toEqual(blended.sort((a, b) => a - b));
+  });
+
+  it("com peso 1 privilegia as dezenas do LSTM", () => {
+    const blended = blendWithStats([1, 2, 3, 4, 5, 6], [55, 56, 57, 58, 59, 60], 1);
+    expect(blended).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+});

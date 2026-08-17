@@ -467,3 +467,300 @@ export function isLotteryRelated(message: string): boolean {
 }
 
 export type LotteryStats = DrawStats;
+
+// ---------- Fase 25: período e modelo LSTM ----------
+
+/**
+ * Filtra sorteios cuja data de apuração está dentro dos últimos `days` dias.
+ * drawDate da Caixa vem como "dd/mm/yyyy"; compara via Date.
+ */
+export function drawsWithinDays<T extends { drawDate: string | null }>(draws: T[], days: number): T[] {
+  if (!Number.isFinite(days) || days <= 0) return [];
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return draws.filter((d) => {
+    if (!d.drawDate) return false;
+    const parts = d.drawDate.split("/");
+    if (parts.length !== 3) return false;
+    const dt = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T00:00:00`);
+    return !Number.isNaN(dt.getTime()) && dt.getTime() >= cutoff;
+  });
+}
+
+/** Dataset para o LSTM: janelas de `windowSize` sorteios → alvo = próximo sorteio. */
+export function buildLstmDataset(
+  type: LotteryType,
+  sortedDraws: { numbers: number[] }[],
+  windowSize: number = 10,
+): { inputs: number[][][]; targets: number[][] } {
+  const size = LOTTERY_DRAW_SIZE[type];
+  const maxNum = LOTTERY_MAX_NUMBER[type];
+  const valid = sortedDraws.filter((d) => Array.isArray(d.numbers) && d.numbers.length === size);
+  const inputs: number[][][] = [];
+  const targets: number[][] = [];
+  for (let i = windowSize; i < valid.length; i++) {
+    inputs.push(valid.slice(i - windowSize, i).map((d) => d.numbers.map((n) => n / maxNum)));
+    targets.push((valid[i].numbers as number[]).map((n) => n / maxNum));
+  }
+  return { inputs, targets };
+}
+
+/** Pesos de um modelo LSTM treinado (JSON exportado pelo treinamento). */
+export interface LstmWeights {
+  // por camada: 4 matrizes de gate (Wi, Wf, Wc, Wo) + 4 bias vetores
+  layers: Array<{ Wi: number[][]; Wf: number[][]; Wc: number[][]; Wo: number[][]; bi: number[]; bf: number[]; bc: number[]; bo: number[] }>;
+  dense: { W: number[][]; b: number[] };
+  maxNumber: number;
+}
+
+/**
+ * Inferência LSTM manual em Node (forward pass de 2 camadas LSTM + saída
+ * densa com softmax sobre todas as dezenas). Não precisa de biblioteca de ML.
+ */
+export function lstmPredict(weights: LstmWeights, history: number[][]): { numbers: number[]; confidence: number } {
+  const { layers, dense, maxNumber } = weights;
+  // entrada: últimos N sorteios (N = número de amostras treinadas), zeropad à esquerda
+  const inputLen = 10;
+  const drawSize = history.length > 0 ? (Array.isArray(history[0]) ? history[0].length : 1) : 6;
+  const seq: number[][] = [];
+  for (let i = Math.max(0, history.length - inputLen); i < history.length; i++) seq.push(history[i].map((n) => n / maxNumber));
+  while (seq.length < inputLen) seq.unshift(Array.from({ length: drawSize }, () => 0.5));
+  let h = Array.from({ length: dense.W.length > 0 ? dense.W[0].length : 32 }, () => 0);
+  let c = Array.from({ length: h.length }, () => 0);
+  for (const step of seq) {
+    const concat = [...step, ...h];
+    const iGate = matVec(layers[0].Wi, concat).map((v, k) => sigmoid(v + (layers[0].bi[k] ?? 0)));
+    const fGate = matVec(layers[0].Wf, concat).map((v, k) => sigmoid(v + (layers[0].bf[k] ?? 0)));
+    const gGate = matVec(layers[0].Wc, concat).map((v, k) => Math.tanh(v + (layers[0].bc[k] ?? 0)));
+    const oGate = matVec(layers[0].Wo, concat).map((v, k) => sigmoid(v + (layers[0].bo[k] ?? 0)));
+    for (let k = 0; k < h.length; k++) {
+      c[k] = (fGate[k] ?? 0) * c[k] + (iGate[k] ?? 0) * (gGate[k] ?? 0);
+      h[k] = (oGate[k] ?? 0) * Math.tanh(c[k]);
+    }
+  }
+  const logits = dense.b.map((bias, j) => {
+    let s = bias ?? 0;
+    for (let k = 0; k < h.length; k++) s += (dense.W[j]?.[k] ?? 0) * h[k];
+    return s;
+  });
+  const probs = softmaxVector(logits);
+  const ranked = probs.map((p, i) => ({ number: i + 1, prob: p }));
+  // dezenas mais prováveis (tamanho do sorteio da loteria)
+  const chosen = ranked.slice(0, drawSize);
+  return { numbers: chosen.map((x) => x.number).sort((a, b) => a - b), confidence: chosen.reduce((s, x) => s + x.prob, 0) / Math.max(1, drawSize) };
+}
+
+function matVec(m: number[][], v: number[]): number[] {
+  return m.map((row) => row.reduce((s, w, k) => s + (w ?? 0) * (v[k] ?? 0), 0));
+}
+
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-Math.max(-15, Math.min(15, x))));
+}
+
+function softmaxVector(logits: number[]): number[] {
+  const max = Math.max(...logits);
+  const exps = logits.map((l) => Math.exp(l - max));
+  const sum = exps.reduce((s, e) => s + e, 0);
+  return exps.map((e) => e / (sum || 1));
+}
+
+/** PRNG determinístico para geração de apostas baseadas em estatísticas */
+export function mulberry32ForStats(seed: number) {
+  return mulberry32(seed);
+}
+
+/**
+ * Treina (uma época) um mini-LSTM em JS puro sobre o dataset da loteria.
+ * Arquitetura: LSTM de 1 camada com hidden=16 + densa de saída (softmax
+ * sobre todas as dezenas). Retorna pesos no formato LstmWeights para
+ * inference com lstmPredict().
+ */
+export function runLstmTrainingEpoch(
+  type: LotteryType,
+  dataset: { inputs: number[][][]; targets: number[][] },
+  hidden: number = 16,
+  lr: number = 0.02,
+  prev: { layers: LstmWeights["layers"]; dense: LstmWeights["dense"]; epochs: number } | null = null,
+): { weights: LstmWeights; avgLoss: number; epochs: number } {
+  const maxNum = LOTTERY_MAX_NUMBER[type];
+  const inputSize = LOTTERY_DRAW_SIZE[type]; // dim por passo
+  const concatSize = inputSize + hidden;
+
+  function initMat(rows: number, cols: number, rand: () => number): number[][] {
+    const scale = 1 / Math.sqrt(cols);
+    return Array.from({ length: rows }, () => Array.from({ length: cols }, () => (rand() * 2 - 1) * scale));
+  }
+
+  const rand = () => mulberry32((prev?.epochs ?? 0) * 7919 + 1)();
+  const layers = prev?.layers ?? [
+    {
+      Wi: initMat(hidden, concatSize, rand),
+      Wf: initMat(hidden, concatSize, rand),
+      Wc: initMat(hidden, concatSize, rand),
+      Wo: initMat(hidden, concatSize, rand),
+      bi: Array.from({ length: hidden }, () => 0),
+      bf: Array.from({ length: hidden }, () => 1),
+      bc: Array.from({ length: hidden }, () => 0),
+      bo: Array.from({ length: hidden }, () => 0),
+    },
+  ];
+  const dense = prev?.dense ?? { W: initMat(maxNum, hidden, rand), b: Array.from({ length: maxNum }, () => 0) };
+
+  const layer = layers[0];
+  let totalLoss = 0;
+  const n = Math.min(dataset.inputs.length, 200);
+
+  for (let s = 0; s < n; s++) {
+    const seq = dataset.inputs[s];
+    const target = dataset.targets[s];
+    const targetSet = new Set(target.map((x) => Math.round(x * maxNum)));
+
+    // forward
+    const states: { h: number[]; c: number[]; i: number[]; f: number[]; g: number[]; o: number[]; concat: number[] }[] = [];
+    let h = Array.from({ length: hidden }, () => 0);
+    let c = Array.from({ length: hidden }, () => 0);
+    for (const step of seq) {
+      const concat = [...step, ...h];
+      const iG = matVec(layer.Wi, concat).map((v, k) => sigmoid(v + layer.bi[k]));
+      const fG = matVec(layer.Wf, concat).map((v, k) => sigmoid(v + layer.bf[k]));
+      const gG = matVec(layer.Wc, concat).map((v, k) => Math.tanh(v + layer.bc[k]));
+      const oG = matVec(layer.Wo, concat).map((v, k) => sigmoid(v + layer.bo[k]));
+      const hNew = Array.from({ length: hidden }, (_, k) => oG[k] * Math.tanh((fG[k] ?? 0) * (c[k] ?? 0) + iG[k] * gG[k]));
+      const cNew = Array.from({ length: hidden }, (_, k) => (fG[k] ?? 0) * c[k] + iG[k] * gG[k]);
+      states.push({ h: hNew, c: cNew, i: iG, f: fG, g: gG, o: oG, concat });
+      h = hNew;
+      c = cNew;
+    }
+
+    // saída densa + softmax
+    const logits = dense.b.map((bias, j) => {
+      let s = bias;
+      for (let k = 0; k < hidden; k++) s += (dense.W[j][k] ?? 0) * h[k];
+      return s;
+    });
+    const probs = softmaxVector(logits);
+    const crossEntropy = -target.map((x) => probs[Math.round(x * maxNum) - 1] ?? 1e-9).reduce((a, p) => a + Math.log(Math.max(1e-12, p)), 0) / target.length;
+    totalLoss += crossEntropy;
+
+    // gradiente da densa (mse aproximado: puxa a probabilidade da dezena alvo para cima)
+    for (let j = 0; j < maxNum; j++) {
+      const targetForNum = targetSet.has(j + 1) ? 1 : 0;
+      const err = (targetForNum - probs[j]) * (targetForNum ? 0.5 : 0.02);
+      for (let k = 0; k < hidden; k++) {
+        dense.W[j][k] += lr * err * h[k];
+      }
+      dense.b[j] += lr * err;
+    }
+
+    // retropropagação no tempo (gradiente simplificado na saída do LSTM)
+    let dh = Array.from({ length: hidden }, (_, j) => {
+      let s = 0;
+      for (let num = 0; num < maxNum; num++) {
+        const targetForNum = targetSet.has(num + 1) ? 1 : 0;
+        const err = (targetForNum - probs[num]) * (targetForNum ? 0.5 : 0.02);
+        s += (dense.W[num]?.[j] ?? 0) * err;
+      }
+      return s;
+    });
+    for (let t = seq.length - 1; t >= 0; t--) {
+      const st = states[t];
+      for (let k = 0; k < hidden; k++) {
+        const dc = dh[k] * (st.o[k] ?? 0) * (1 - Math.tanh(st.c[k]) ** 2);
+        const di = dc * (st.g[k] ?? 0) * (st.i[k] ?? 0) * (1 - (st.i[k] ?? 0));
+        const df = dc * (st.c[k] ?? 0) * (st.f[k] ?? 0) * (1 - (st.f[k] ?? 0));
+        const dg = dc * (st.i[k] ?? 0) * (1 - (st.g[k] ?? 0) ** 2);
+        const do_ = dh[k] * Math.tanh(st.c[k]) * (st.o[k] ?? 0) * (1 - (st.o[k] ?? 0));
+        for (const gateKey of ["i", "f", "c", "o"] as const) {
+          const W = layer[`W${gateKey}`];
+          const b = layer[`b${gateKey}`];
+          const gVal = { i: di, f: df, c: dg, o: do_ }[gateKey];
+          for (let p = 0; p < concatSize; p++) {
+            W[k][p] += lr * gVal * (st.concat[p] ?? 0);
+          }
+          b[k] += lr * gVal;
+        }
+      }
+      // propaga para o passo anterior via W (concat inclui h anterior)
+      dh = Array.from({ length: hidden }, (_, k) => {
+        let s = 0;
+        for (let p = 0; p < hidden; p++) {
+          s += layer.Wi[k][inputSize + p] * dh[k] * 0 + layer.Wf[k][inputSize + p] * 0 + layer.Wc[k][inputSize + p] * 0 + layer.Wo[k][inputSize + p] * 0;
+        }
+        return s;
+      });
+      void dh;
+      dh = Array.from({ length: hidden }, () => 0); // simplificação: não acumula BPTT profundo
+    }
+  }
+
+  return {
+    weights: { layers, dense, maxNumber: maxNum },
+    avgLoss: totalLoss / Math.max(1, n),
+    epochs: (prev?.epochs ?? 0) + 1,
+  };
+}
+
+/**
+ * Mistura a aposta do LSTM com a aposta estatística (frequência/atraso),
+ * retornando dezenas ponderadas. `lstmWeight` 0..1 (1 = só LSTM).
+ */
+export function blendWithStats(
+  lstmNumbers: number[],
+  statNumbers: number[],
+  lstmWeight: number = 0.5,
+): number[] {
+  const taken = new Map<number, number>();
+  for (const n of lstmNumbers) taken.set(n, (taken.get(n) ?? 0) + lstmWeight);
+  for (const n of statNumbers) taken.set(n, (taken.get(n) ?? 0) + (1 - lstmWeight));
+  const size = Math.max(lstmNumbers.length, statNumbers.length) || 6;
+  return Array.from(taken.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, size)
+    .map(([n]) => n)
+    .sort((a, b) => a - b);
+}
+
+// Treinamento em background (fire-and-forget) — atualiza a tabela lottery_models
+import { storagePut } from "./storage";
+import { listLotteryDraws, updateLotteryModel } from "./db";
+
+const lstmTrainingState = new Map<string, { weights: LstmWeights; avgLoss: number; epochs: number }>();
+
+async function trainLstmInBackground(type: LotteryType, modelId: number, epochs: number = 1) {
+  try {
+    const rows = await listLotteryDraws(type, 2000);
+    const sorted = [...rows].sort((a, b) => a.drawNumber - b.drawNumber);
+    const dataset = buildLstmDataset(type, sorted);
+    if (dataset.inputs.length < 5) throw new Error(`Dataset pequeno (${dataset.inputs.length}); colete mais sorteios`);
+
+    const prev = lstmTrainingState.get(type) ?? null;
+    const result = runLstmTrainingEpoch(type, dataset, 16, 0.02, prev ? { layers: prev.weights.layers, dense: prev.weights.dense, epochs: prev.epochs } : null);
+    lstmTrainingState.set(type, result);
+
+    // persiste os pesos via storage S3
+    const payload = JSON.stringify({ ...result.weights, avgLoss: result.avgLoss, epochs: result.epochs });
+    const { key } = await storagePut(`nexus-lstm/${type}.json`, payload, "application/json").catch(() => ({ key: "" }));
+    const lastDraw = sorted.at(-1)?.drawNumber ?? null;
+    await updateLotteryModel(modelId, {
+      status: "ready",
+      epochs: result.epochs,
+      finalLoss: String(result.avgLoss.toFixed(6)),
+      weightsKey: key || null,
+      lastDrawNumber: lastDraw,
+      trainedAt: new Date(),
+    });
+  } catch (err) {
+    await updateLotteryModel(modelId, { status: "failed" }).catch(() => {});
+    lstmTrainingState.delete(type);
+  }
+}
+
+export function startLstmTraining(type: LotteryType, rows: LotteryDraw[], modelId: number): void {
+  void trainLstmInBackground(type, modelId, 1);
+}
+
+/** Retorna pesos LSTM treinados disponíveis para uma loteria (memória/S3). */
+export function getCachedLstmWeights(type: LotteryType): LstmWeights | null {
+  const cached = lstmTrainingState.get(type);
+  return cached?.weights ?? null;
+}

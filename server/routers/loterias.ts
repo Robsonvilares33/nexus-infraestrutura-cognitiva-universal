@@ -1,18 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, updateLotteryBet, upsertLotteryAlert } from "../db";
-import {
-  COLLECT_LIMITS,
-  LOTTERY_LABELS,
-  LOTTERY_TYPES,
-  type LotteryType,
-  checkBetHits,
-  collectAndPersist,
-  computeStats,
-  generateStatisticalBet,
-  validateNumbers,
-} from "../nexus-loterias";
+import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs } from "../db";
+import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, lstmPredict, mulberry32ForStats, startLstmTraining, type LstmWeights, validateNumbers } from "../nexus-loterias";
+import { storageGet, storagePut } from "../storage";
 
 // Coleção em andamento (uma coleta por processo, simples)
 let collecting: Promise<{ type: string; latest: number | null; collected: number; skipped: number; errors: number }> | null = null;
@@ -84,7 +75,7 @@ export const loteriasRouter = router({
 
   // Estatísticas completas (frequência, atraso, quentes/frias, pares, acumulados)
   stats: publicProcedure
-    .input(z.object({ type: z.enum(LOTTERY_TYPES) }))
+    .input(z.object({ type: z.enum(LOTTERY_TYPES), period: z.union([z.literal("30"), z.literal("60"), z.literal("90"), z.literal("all")]).default("all") }))
     .query(async ({ input }) => {
       const rows = await listLotteryDraws(input.type, 2000);
       if (rows.length === 0) {
@@ -93,8 +84,12 @@ export const loteriasRouter = router({
           message: `Nenhum sorteio de ${LOTTERY_LABELS[input.type]} coletado ainda. Use loterias.collect para buscar os dados oficiais da Caixa.`,
         });
       }
+      const filtered = input.period !== "all" ? drawsWithinDays(rows, parseInt(input.period, 10)) : rows;
+      if (filtered.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `Nenhum sorteio de ${LOTTERY_LABELS[input.type]} nos últimos ${input.period} dias.` });
+      }
       // converter rows do drizzle para o tipo LotteryDraw esperado por computeStats
-      return computeStats(input.type, rows as any);
+      return computeStats(input.type, filtered as any);
     }),
 
   // Geração de apostas estatísticas (simulação; sorteios são aleatórios)
@@ -193,6 +188,108 @@ export const loteriasRouter = router({
     .mutation(async ({ input, ctx }) => {
       await deleteLotteryAlert(ctx.user.id, input.type);
       return { removed: true };
+    }),
+
+  // ---------- Fase 25: coleta histórica completa + modelo LSTM ----------
+
+  // Jobs de coleta histórica (status + progresso)
+  listCollectJobs: publicProcedure.query(() => listLotteryCollectJobs()),
+
+  // Dispara a coleta histórica completa (500/300 concursos por loteria)
+  collectHistory: protectedProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES).optional() }))
+    .mutation(async ({ input }) => {
+      if (collecting) throw new TRPCError({ code: "CONFLICT", message: "Já existe uma coleta em andamento" });
+      const types: LotteryType[] = input.type ? [input.type] : LOTTERY_TYPES;
+      const jobIds: Record<string, number> = {};
+      for (const t of types) {
+        jobIds[t] = await createLotteryCollectJob(t, COLLECT_LIMITS[t]);
+      }
+      collecting = (async () => {
+        try {
+          for (const t of types) {
+            const limit = COLLECT_LIMITS[t];
+            await setLotteryCollectJobStatus(jobIds[t], { totalDraws: limit });
+            await collectAndPersist(t, limit, async (draw) => {
+              const n = await insertLotteryDraw({
+                lotteryType: t,
+                drawNumber: draw.drawNumber,
+                drawDate: draw.drawDate,
+                numbers: draw.numbers,
+                accumulatedPrize: draw.accumulatedPrize,
+                estimatedNextPrize: draw.estimatedNextPrize,
+                winners: draw.winners,
+              });
+              void n;
+              return 1;
+            });
+            await setLotteryCollectJobStatus(jobIds[t], { status: "done", collectedDraws: limit });
+          }
+        } catch (err) {
+          for (const t of types) {
+            await setLotteryCollectJobStatus(jobIds[t], { status: "failed", error: String(err) });
+          }
+        } finally {
+          collecting = null;
+        }
+        return { type: "all", collected: 0, skipped: 0, errors: 0, latest: null };
+      })().then((r) => r);
+      void collecting;
+      return { started: true, types, limit: undefined as number | undefined };
+    }),
+
+  // Treinar modelo LSTM para uma loteria (background, fire-and-forget)
+  trainModel: protectedProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES) }))
+    .mutation(async ({ input }) => {
+      const rows = await listLotteryDraws(input.type, 2000);
+      if (rows.length < 60) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Histórico insuficiente para treinar ${LOTTERY_LABELS[input.type]}: preciso de pelo menos 60 sorteios (tenho ${rows.length}). Colete a coleção histórica primeiro.` });
+      }
+      const modelId = await createLotteryModel(input.type);
+      startLstmTraining(input.type, rows, modelId);
+      return { started: true, modelId };
+    }),
+
+  // Modelos treinados por loteria
+  listModels: publicProcedure.query(() => listLotteryModels()),
+
+  // Previsão LSTM: combina o modelo treinado com o histórico real
+  lstmBet: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES), count: z.number().int().min(1).max(5).default(1) }))
+    .query(async ({ input }) => {
+      const models = (await listLotteryModels(input.type)).filter((m) => m.status === "ready");
+      const best = models[0];
+      let weights: LstmWeights | null = null;
+      if (best?.weightsKey) {
+        try {
+          const url = await storageGet(best.weightsKey);
+          const res = await fetch(url.url);
+          weights = ((await res.json()) as LstmWeights) ?? null;
+        } catch {
+          weights = null;
+        }
+      }
+      const rows = await listLotteryDraws(input.type, 2000);
+      const history = rows.map((d) => d.numbers as number[]);
+      const out: { numbers: number[]; confidence: number; method: string }[] = [];
+      const stats = rows.length > 0 ? computeStats(input.type, rows as any) : null;
+      for (let i = 0; i < input.count; i++) {
+        if (weights && history.length > 0) {
+          const pred = lstmPredict(weights, history);
+          const statBet = stats ? generateStatisticalBet(input.type, stats, Date.now() + i) : [];
+          const blended = blendWithStats(pred.numbers, statBet);
+          out.push({ numbers: blended, confidence: pred.confidence, method: "LSTM" });
+        } else if (stats) {
+          out.push({ numbers: generateStatisticalBet(input.type, stats, Date.now() + i), confidence: 0, method: "estatístico" });
+        }
+      }
+      return {
+        bets: out,
+        hasModel: !!weights,
+        modelStatus: best?.status ?? "none",
+        disclaimer: "Previsão LSTM é exercício estatístico — sorteios são aleatórios e não há garantia de acerto.",
+      };
     }),
 
   // ---------- Fase 24: estatísticas pessoais, exportação e compartilhamento ----------

@@ -419,3 +419,39 @@ export const lotteryAlerts = mysqlTable("lotteryAlerts", {
 }));
 export type LotteryAlert = typeof lotteryAlerts.$inferSelect;
 export type InsertLotteryAlert = typeof lotteryAlerts.$inferInsert;
+
+// Fase 25: job de coleta histórica em background (500/300 concursos por loteria)
+export const lotteryCollectJobs = mysqlTable("lotteryCollectJobs", {
+  id: int("id").autoincrement().primaryKey(),
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  totalDraws: int("totalDraws").default(0).notNull(),
+  // quantos concursos baixados até agora
+  collectedDraws: int("collectedDraws").default(0).notNull(),
+  // running | done | failed
+  status: varchar("status", { length: 8 }).default("running").notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  finishedAt: timestamp("finishedAt"),
+  error: text("error"),
+}, (t) => ({
+  idxTypeStatus: index("idx_job_type_status").on(t.lotteryType, t.status),
+}));
+export type LotteryCollectJob = typeof lotteryCollectJobs.$inferSelect;
+export type InsertLotteryCollectJob = typeof lotteryCollectJobs.$inferInsert;
+
+// Fase 25: modelos LSTM treinados por loteria (pesos no storage, métricas no banco)
+export const lotteryModels = mysqlTable("lotteryModels", {
+  id: int("id").autoincrement().primaryKey(),
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  // storage key com os pesos JSON do modelo treinado
+  weightsKey: varchar("weightsKey", { length: 255 }),
+  epochs: int("epochs").default(0).notNull(),
+  finalLoss: varchar("finalLoss", { length: 20 }),
+  lastDrawNumber: int("lastDrawNumber"),
+  status: varchar("status", { length: 8 }).default("training").notNull(),
+  trainedAt: timestamp("trainedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  idxType: index("idx_model_type").on(t.lotteryType, t.status),
+}));
+export type LotteryModel = typeof lotteryModels.$inferSelect;
+export type InsertLotteryModel = typeof lotteryModels.$inferInsert;

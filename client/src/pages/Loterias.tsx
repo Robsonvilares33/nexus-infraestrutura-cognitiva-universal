@@ -63,6 +63,7 @@ export default function Loterias() {
   const [, navigate] = useLocation();
   const [lottery, setLottery] = useState<LotteryType>("megasena");
   const [betCount, setBetCount] = useState<string>("1");
+  const [period, setPeriod] = useState<"30" | "60" | "90" | "all">("all");
   // Fase 23: estados de apostas salvas e alertas de acumulado
   const [betDialogOpen, setBetDialogOpen] = useState(false);
   const [generatedBets, setGeneratedBets] = useState<number[][]>([]);
@@ -72,8 +73,43 @@ export default function Loterias() {
   const { data: lotteries } = trpc.loterias.list.useQuery();
   const { data: counts, isLoading: countsLoading } = trpc.loterias.counts.useQuery();
   const { data: collectStatus } = trpc.loterias.collectStatus.useQuery(undefined, { refetchInterval: 3000 });
-  const { data: stats, isLoading: statsLoading, error: statsError } = trpc.loterias.stats.useQuery({ type: lottery });
+  const { data: stats, isLoading: statsLoading, error: statsError } = trpc.loterias.stats.useQuery({ type: lottery, period });
   const { data: draws } = trpc.loterias.draws.useQuery({ type: lottery, limit: 30 });
+
+  // ---------- Fase 25: coleta histórica completa + modelo LSTM ----------
+  const { data: collectJobs } = trpc.loterias.listCollectJobs.useQuery(undefined, { refetchInterval: 5000 });
+  const { data: lstmModels } = trpc.loterias.listModels.useQuery(undefined, { refetchInterval: 10000 });
+  const { data: lstmPreds } = trpc.loterias.lstmBet.useQuery({ type: lottery, count: 1 }, { enabled: !!stats });
+  const collectHistoryMutation = trpc.loterias.collectHistory.useMutation();
+  const trainModelMutation = trpc.loterias.trainModel.useMutation();
+
+  const currentModel = lstmModels?.find((m) => m.lotteryType === lottery) ?? null;
+
+  const handleCollectHistory = async () => {
+    if (!user) {
+      toast.error("Faça login para iniciar a coleta histórica completa");
+      return;
+    }
+    try {
+      await collectHistoryMutation.mutateAsync({ type: lottery });
+      toast.success("Coleta histórica iniciada em segundo plano — milhares de concursos serão buscados na Caixa. Acompanhe no painel de coleções.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao iniciar a coleta histórica");
+    }
+  };
+
+  const handleTrainLstm = async () => {
+    if (!user) {
+      toast.error("Faça login para treinar o modelo");
+      return;
+    }
+    try {
+      const res = await trainModelMutation.mutateAsync({ type: lottery });
+      toast.success(`Treinamento LSTM da ${LOTTERY_LABELS[lottery]} iniciado em segundo plano (modelo #${res.modelId}).`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao iniciar o treinamento");
+    }
+  };
   const collectMutation = trpc.loterias.collect.useMutation();
 
   // ---------- Fase 23: apostas salvas + alertas ----------
@@ -275,6 +311,25 @@ export default function Loterias() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Filtro de período — Fase 25 */}
+          <div className="hidden sm:flex items-center rounded-lg border border-white/10 bg-white/5 p-0.5">
+            {([
+              { v: "30" as const, label: "30 dias" },
+              { v: "60" as const, label: "60 dias" },
+              { v: "90" as const, label: "90 dias" },
+              { v: "all" as const, label: "Todo" },
+            ]).map(({ v, label }) => (
+              <button
+                key={v}
+                onClick={() => setPeriod(v)}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  period === v ? "bg-[#7cf3ff]/20 text-[#7cf3ff]" : "text-white/50 hover:text-white"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Select value={lottery} onValueChange={(v) => setLottery(v as LotteryType)}>
             <SelectTrigger className="w-44 bg-[#0a0d1a] border-white/10 text-white">
               <SelectValue />
@@ -381,6 +436,116 @@ export default function Loterias() {
             </CardContent>
           </Card>
 
+          {/* Fase 25: coletas históricas em andamento */}
+          {collectJobs && collectJobs.some((j) => j.status === "running") && (
+            <Card className="bg-[#0a0d1a] border-[#7cf3ff]/30">
+              <CardHeader>
+                <CardTitle className="text-white text-base flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#7cf3ff]" /> Coleção histórica em andamento
+                </CardTitle>
+                <CardDescription className="text-white/50">Concursos sendo buscados diretamente na Caixa (atualização a cada 5s).</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {collectJobs.filter((j) => j.status === "running").map((j) => (
+                  <div key={j.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+                    <span className="text-white/80 font-mono">{LOTTERY_LABELS[j.lotteryType as LotteryType]}</span>
+                    <span className="text-white/50 text-xs">
+                      {j.collectedDraws}/{j.totalDraws} concursos
+                    </span>
+                    <Badge variant="outline" className="border-[#7cf3ff]/40 text-[#7cf3ff] text-xs">coletando</Badge>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Fase 25: painel de previsões LSTM */}
+          <Card className="bg-[#0a0d1a] border-[#c9b8ff]/30">
+            <CardHeader>
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <span className="text-[#c9b8ff]">◈</span> Previsão LSTM — {LOTTERY_LABELS[lottery]}
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                {currentModel
+                  ? `Modelo treinado: ${currentModel.epochs} épocas · loss ${currentModel.finalLoss ?? "—"}${currentModel.trainedAt ? ` · concluído em ${new Date(currentModel.trainedAt).toLocaleString("pt-BR")}` : ""}`
+                  : "Nenhum modelo treinado para esta loteria ainda. Colete a coleção histórica completa e treine o modelo abaixo."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {lstmPreds && lstmPreds.bets.length > 0 ? (
+                <div className="space-y-3">
+                  {lstmPreds.bets.map((b, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                      <Badge variant="outline" className="border-[#c9b8ff]/40 text-[#c9b8ff] text-xs">{b.method}</Badge>
+                      <div className="flex flex-wrap gap-1.5">
+                        {b.numbers.map((n) => (
+                          <span
+                            key={n}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold text-black"
+                            style={{ background: LOTTERY_COLORS[lottery] || NEXUS_CYAN }}
+                          >
+                            {String(n).padStart(2, "0")}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="text-xs text-white/40 ml-auto">confiança {(b.confidence * 100).toFixed(1)}%</span>
+                      <button
+                        onClick={() => void handleSaveBet(b.numbers)}
+                        className="inline-flex items-center gap-1 rounded-md border border-[#7cff9f]/40 bg-white/5 px-2 py-1 text-[10px] font-mono text-[#7cff9f] hover:bg-[#7cff9f]/10 transition-colors"
+                        title="Salvar e conferir automaticamente"
+                      >
+                        Salvar aposta
+                      </button>
+                    </div>
+                  ))}
+                  {!lstmPreds.hasModel && (
+                    <p className="text-xs text-[#ffd479]/80">
+                      {lstmPreds.modelStatus === "training" ? "Modelo ainda em treinamento — apostas geradas pelo método estatístico." : "Sem modelo pronto — apostas geradas pelo método estatístico de frequência/atraso."}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-white/50">Nenhum dado suficiente para gerar a previsão.</p>
+              )}
+              <div className="flex flex-wrap gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-[#c9b8ff]/40 text-[#c9b8ff] hover:bg-[#c9b8ff]/10"
+                  onClick={handleTrainLstm}
+                  disabled={trainModelMutation.isPending}
+                >
+                  {trainModelMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Treinando...
+                    </>
+                  ) : currentModel?.status === "training" ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Em treinamento
+                    </>
+                  ) : (
+                    "Treinar modelo LSTM"
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-[#ffd479]/40 text-[#ffd479] hover:bg-[#ffd479]/10"
+                  onClick={handleCollectHistory}
+                  disabled={collectHistoryMutation.isPending}
+                >
+                  {collectHistoryMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Iniciando...
+                    </>
+                  ) : (
+                    "Coletar histórico completo"
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Tabs defaultValue="frequencia">
             <TabsList className="bg-white/5">
               <TabsTrigger value="frequencia" className="data-[state=active]:bg-[#7cf3ff]/20">Frequência</TabsTrigger>
@@ -394,7 +559,8 @@ export default function Loterias() {
                   <CardHeader>
                     <CardTitle className="text-white text-base">Frequência por dezena</CardTitle>
                     <CardDescription className="text-white/50">
-                      Quantas vezes cada dezena apareceu nos {stats?.totalDraws} sorteios coletados
+                      Quantas vezes cada dezena apareceu nos {stats?.totalDraws} sorteios
+                      {period !== "all" ? ` dos últimos ${period} dias` : " coletados"}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

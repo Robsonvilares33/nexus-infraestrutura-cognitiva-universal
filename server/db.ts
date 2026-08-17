@@ -9,9 +9,11 @@ import {
   projectCollaborations, collaborationMessages, pluginVerifications,
   pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
   lotteryDraws, lotteryBets, lotteryAlerts,
+  lotteryCollectJobs, lotteryModels,
   type WebhookEvent,
   type InsertUser, type InsertProjectShare, type InsertLotteryDraw,
-  type InsertLotteryBet, type InsertLotteryAlert
+  type InsertLotteryBet, type InsertLotteryAlert,
+  type InsertLotteryCollectJob, type InsertLotteryModel
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -2004,4 +2006,89 @@ export async function listCheckedBetsWithDraws(userId: number): Promise<LotteryB
     .orderBy(desc(lotteryDraws.drawNumber), desc(lotteryBets.id))
     .limit(500);
   return rows.filter((r) => r.checked === 1) as LotteryBetStatsRow[];
+}
+
+// ---------- Fase 25: coleta histórica e modelos LSTM ----------
+
+export async function createLotteryCollectJob(type: string, total: number): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const res = await db
+    .insert(lotteryCollectJobs)
+    .values({ lotteryType: type, totalDraws: total, status: "running" } as typeof lotteryCollectJobs.$inferInsert)
+    .execute();
+  const header = Array.isArray(res) ? res[0] : res;
+  return Number((header as { insertId?: number }).insertId ?? 0);
+}
+export async function setLotteryCollectJobStatus(id: number, patch: { status?: string; collectedDraws?: number; totalDraws?: number; error?: string }): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const set: Record<string, unknown> = {};
+  if (patch.status) set.status = patch.status;
+  if (typeof patch.collectedDraws === "number") set.collectedDraws = patch.collectedDraws;
+  if (typeof patch.totalDraws === "number") set.totalDraws = patch.totalDraws;
+  if (patch.error !== undefined) set.error = patch.error;
+  if (patch.status === "done") set.finishedAt = new Date();
+  await db.update(lotteryCollectJobs).set(set as typeof lotteryCollectJobs.$inferInsert).where(eq(lotteryCollectJobs.id, id)).execute();
+}
+export async function updateLotteryCollectJob(id: number, patch: Partial<InsertLotteryCollectJob>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.update(lotteryCollectJobs).set(patch as typeof lotteryCollectJobs.$inferInsert).where(eq(lotteryCollectJobs.id, id)).execute();
+}
+export async function listLotteryCollectJobs(type?: string): Promise<Array<{ id: number; lotteryType: string; totalDraws: number; collectedDraws: number; status: string; startedAt: Date; finishedAt: Date | null; error: string | null }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryCollectJobs.id,
+      lotteryType: lotteryCollectJobs.lotteryType,
+      totalDraws: lotteryCollectJobs.totalDraws,
+      collectedDraws: lotteryCollectJobs.collectedDraws,
+      status: lotteryCollectJobs.status,
+      startedAt: lotteryCollectJobs.startedAt,
+      finishedAt: lotteryCollectJobs.finishedAt,
+      error: lotteryCollectJobs.error,
+    })
+    .from(lotteryCollectJobs)
+    .where(type ? eq(lotteryCollectJobs.lotteryType, type) : undefined)
+    .orderBy(desc(lotteryCollectJobs.id))
+    .limit(50);
+  return rows;
+}
+
+export async function createLotteryModel(type: string): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const res = await db
+    .insert(lotteryModels)
+    .values({ lotteryType: type, status: "training" } as typeof lotteryModels.$inferInsert)
+    .execute();
+  const header = Array.isArray(res) ? res[0] : res;
+  return Number((header as { insertId?: number }).insertId ?? 0);
+}
+export async function updateLotteryModel(id: number, patch: Partial<InsertLotteryModel>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await db.update(lotteryModels).set(patch as typeof lotteryModels.$inferInsert).where(eq(lotteryModels.id, id)).execute();
+}
+export async function listLotteryModels(type?: string): Promise<Array<{ id: number; lotteryType: string; weightsKey: string | null; epochs: number; finalLoss: string | null; lastDrawNumber: number | null; status: string; trainedAt: Date | null }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryModels.id,
+      lotteryType: lotteryModels.lotteryType,
+      weightsKey: lotteryModels.weightsKey,
+      epochs: lotteryModels.epochs,
+      finalLoss: lotteryModels.finalLoss,
+      lastDrawNumber: lotteryModels.lastDrawNumber,
+      status: lotteryModels.status,
+      trainedAt: lotteryModels.trainedAt,
+    })
+    .from(lotteryModels)
+    .where(type ? eq(lotteryModels.lotteryType, type) : undefined)
+    .orderBy(desc(lotteryModels.id))
+    .limit(10);
+  return rows;
 }

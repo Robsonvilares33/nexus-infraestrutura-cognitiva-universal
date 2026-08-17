@@ -148,6 +148,13 @@
       "when": 1786931326881,
       "tag": "0020_regular_excalibur",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1786932939277,
+      "tag": "0021_bouncy_excalibur",
+      "breakpoints": true
     }
   ]
 }

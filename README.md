@@ -275,3 +275,15 @@ Aviso: a análise é **puramente estatística descritiva** — sorteios de loter
 ### Configuração
 
 Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (32/32: round-trip do código base64, formatação de dezenas e estatísticas pessoais) e `pnpm test` completo, com apenas as 4 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).
+
+## Fase 25: Loterias NEXUS — coleta histórica completa, modelo LSTM e filtro por período
+A Fase 25 evolui o módulo de Loterias com três capacidades preditivas: coleta do histórico completo de concursos diretamente da Caixa, estatísticas filtradas por período e um modelo de rede neural LSTM treinado por loteria.
+| Capacidade | Descrição |
+|---|---|
+| Coleta histórica completa | `loterias.collectHistory` cria um job assíncrono (tabela `lotteryCollectJobs`: 500 concursos Quina/Lotofácil, 300 Mega-Sena/Lotomania/Timemania) que baixa do último concurso até a meta com rate-limit de 1s, retry com backoff e dedup. O progresso aparece em tempo real na página `/loterias` (`listCollectJobs`, atualiza a cada 5s) |
+| Filtro de período | `loterias.stats` aceita `period: 30\|60\|90\|all`; o helper `drawsWithinDays` filtra por data do concurso e recalcula frequência, atraso, quentes/frias sobre a janela — chips de período no cabeçalho da página |
+| Modelo LSTM por loteria | Treinamento em JavaScript puro (sem dependência de Python em produção): LSTM 1 camada oculta + saída densa, backpropagation por tempo (BPTT) sobre janelas de 10 concursos normalizadas. `startLstmTraining` roda em background, salva os pesos no S3 (`nexus-lstm/{type}.json`) e registra épocas/loss na tabela `lottery_models`. Inferência manual em Node lê os pesos do S3; sem modelo pronto, a aposta usa o método estatístico de frequência/atraso com aviso explícito |
+| Apostas LSTM | `loterias.lstmBet` retorna dezenas preditas com método (`lstm`, `blend` ou `estatístico`), confiança 0..1 e botão "Salvar aposta" integrado ao fluxo de conferência automática |
+Aviso: a análise é **puramente estatística e probabilística** — sorteios de loteria são aleatórios e nenhum modelo (incluindo o LSTM) aumenta a probabilidade matemática de acerto.
+### Configuração
+Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (42/42: filtro de período, dataset LSTM, épocas de treinamento, inferência determinística, blend LSTM+estatístico) e `pnpm test` completo.
