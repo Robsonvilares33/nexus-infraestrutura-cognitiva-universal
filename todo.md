@@ -283,4 +283,5 @@
 - [x] Frontend: página /loterias com seletor de loteria, KPIs (sorteios, último concurso, prêmio estimado, acumulados), últimos sorteios com dezenas, gráficos de frequência e atraso (Recharts), pares comuns, listas quentes/frias/em atraso e gerador estatístico de apostas com disclaimer
 - [x] Vitest coverage da Fase 22 (estatísticas, validação de dezenas, geração de apostas — 18/18 testes passando)
 - [x] README.md com seção Fase 22 (tabela de capacidades, coleta agendada, aviso estatístico)
-- [ ] Sync GitHub (branch sync-fase22b + PR #11)
+- [x] Heartbeat diário criado na plataforma (task_uid 2Lj4n6k86t6tJerNN9xnqF, cron 14:05 UTC) e callback em produção validado (403 sem cookie cron = autenticação OK)
+- [ ] Sync GitHub: push bloqueado pelo GITHUB PUSH PROTECTION (GH013) — usar "Exportar código" / "Sincronizar esta prévia" no Management UI (Settings → GitHub) em vez do git push, pois o remote contém apenas commits verificados
