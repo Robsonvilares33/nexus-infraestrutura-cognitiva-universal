@@ -231,6 +231,47 @@ async function startServer() {
     }
   });
 
+  // Fase 22: atualização diária dos resultados das loterias da Caixa (14:05 UTC ~11h BRT, após sorteios)
+  app.post("/api/scheduled/loterias-collect", async (req, res) => {
+    try {
+      const { sdk } = await import("./sdk");
+      try {
+        await sdk.authenticateRequest(req);
+      } catch {
+        const sessionHeader = req.headers["x-manus-user-session"];
+        if (!sessionHeader || typeof sessionHeader !== "string") {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+        const session = await sdk.verifySession(sessionHeader);
+        if (!session) return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { collectAndPersist } = await import("../nexus-loterias");
+      const { insertLotteryDraw } = await import("../db");
+      const results: { type: string; collected: number; errors: number; latest: number | null }[] = [];
+      for (const type of ["megasena", "quina", "lotofacil", "lotomania", "timemania"] as const) {
+        try {
+          const r = await collectAndPersist(type, 5, (d) =>
+            insertLotteryDraw({
+              lotteryType: type,
+              drawNumber: d.drawNumber,
+              drawDate: d.drawDate,
+              numbers: d.numbers,
+              accumulatedPrize: d.accumulatedPrize,
+              estimatedNextPrize: d.estimatedNextPrize,
+              winners: d.winners,
+            }),
+          );
+          results.push({ type, collected: r.collected, errors: r.errors, latest: r.latest });
+        } catch {
+          results.push({ type, collected: 0, errors: 1, latest: null });
+        }
+      }
+      return res.json({ success: true, results });
+    } catch (error) {
+      return res.status(500).json({ error: String(error) });
+    }
+  });
+
   // Scheduled mission callback endpoint
   app.post("/api/scheduled/mission-*", async (req, res) => {
     try {

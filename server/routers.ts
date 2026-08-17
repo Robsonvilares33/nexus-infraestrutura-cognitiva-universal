@@ -43,6 +43,7 @@ import {
   saveSuperNoteEmbedding, semanticSearchSuperNotes, computeTextRelevance,
   getLlmSettings, upsertLlmSettings,
 } from "./db";
+import { loteriasRouter } from "./routers/loterias";
 import { generateEmbedding, isEmbeddingAvailable, EMBEDDING_MODEL } from "./nexus-embeddings";
 import { multiAgentChat, buildAgentSystemPrompt, AGENT_PERSONAS } from "./nexus-multichat";
 import { invokeLLM, listLLMModels } from "./_core/llm";
@@ -1411,5 +1412,8 @@ Return the IDs (integers) of memories semantically relevant to the query. Most r
         return { success: true };
       }),
   }),
+  // Fase 22: módulo Loterias — análise estatística com dados oficiais da Caixa
+  loterias: loteriasRouter,
 });
+
 export type AppRouter = typeof appRouter;

@@ -218,3 +218,23 @@ Robustez de integrações (retry com backoff exponencial), streaming real para t
 ### Configuração
 
 Nenhuma variável nova. Testes: `server/nexus-webhooks-f21.test.ts` (8/8: backoff 500→falha completa, sucesso na 2ª tentativa, 4xx definitivo, rede com ECONNRESET, métricas por dia, SSE OpenAI-compat e evento `quota` 412) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).
+
+## Fase 22: Loterias NEXUS — análise estatística com dados oficiais da Caixa
+
+Sistema preditivo-cognitivo estatístico para as loterias brasileiras, consumindo diretamente a API pública da Caixa Loterias (sem token), com coleta agendada diária via Heartbeat.
+
+| Capacidade | Descrição |
+|---|---|
+| Fonte de dados | API pública `servicebus2.caixa.gov.br/portaldeloterias/api/{loteria}/{concurso}` (Mega-Sena, Quina, Lotofácil, Lotomania e Timemania) — sem chave e sem token |
+| Coleta resiliente | `collectAndPersist` com retry (3 tentativas, backoff exponencial), rate-limit de 1s entre requisições e dedup por `(loteria, concurso)` via índice único `uq_lottery_draw` na tabela `lottery_draws` |
+| Detecção do último concurso | O endpoint `/0` da Caixa é instável no sandbox (500 intermitente); `findLatestDrawNumber` usa **busca binária** sobre o intervalo de concursos para localizar o último com precisão |
+| Estatísticas | `computeStats`: frequência por dezena, atraso (draws desde a última aparição), quentes/frias/delayed (top 10), pares de dezenas mais comuns e contagem de sorteios acumulados no período |
+| Gerador estatístico | `generateStatisticalBet` pondera dezenas quentes (40%), em atraso (30%) e aleatórias (30%) com PRNG determinístico (mulberry32, seed = `Date.now() + i`) — acompanhado de disclaimer explícito de aleatoriedade |
+| Atualização diária | Callback heartbeat `/api/scheduled/loterias-collect` (14:05 UTC / 11h BRT) atualiza os 5 sorteios mais recentes de cada loteria; o cron é criado na plataforma com `manus-heartbeat create` |
+| Frontend `/loterias` | Seletor de loteria, KPIs (sorteios coletados, último concurso, prêmio estimado, acumulados), últimos sorteios com dezenas coloridas, gráficos de frequência (BarChart) e atraso (LineChart) via Recharts, pares comuns, listas quentes/frias/em atraso e gerador de apostas com diálogo |
+
+Aviso: a análise é **puramente estatística descritiva** — sorteios de loteria são aleatórios e nenhuma estatística aumenta a probabilidade matemática de acerto. O módulo exibe esse disclaimer na UI.
+
+### Configuração
+
+Nenhuma variável nova. Testes: `server/nexus-loterias.test.ts` (18/18: validação de dezenas por loteria, frequência, atraso, pares comuns, acumulados, PRNG determinístico e limites do gerador) e `pnpm test` completo, com apenas as 2 falhas externas conhecidas por cota 412 do LLM de teste (`server/nexus.test.ts`).

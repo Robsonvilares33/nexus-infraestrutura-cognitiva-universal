@@ -272,3 +272,15 @@
 - [x] Vitest coverage da Fase 21 (retry/backoff, metrics, streaming externo)
 - [x] README.md e todo.md com seção Fase 21
 - [x] Sync GitHub (branch sync-fase21b + PR #10 aberto em https://github.com/Robsonvilares33/nexus-infraestrutura-cognitiva-universal/pull/10; árvores HEAD == checkpoint b0399074, sem tokens)  e PR #9 mesclado Sync GitHub (branch sync-fase21b + PR #10)
+
+## Fase 22: Loterias NEXUS — análise estatística com dados públicos da Caixa Loterias
+
+- [x] Investigar fontes públicas gratuitas de resultados da Caixa (sem token) e validar acesso (servicebus2.caixa.gov.br)
+- [x] Backend: schema `lottery_draws` (tipo, concurso, data, dezenas, acumulado, ganhadores) + índice e dedup (Migration 0019 aplicada; backfill inicial: 30 linhas, 6 sorteios recentes por loteria)
+- [x] Backend: coletor de resultados (últimos 500 de Quina/Lotofácil, 300 de Mega-Sena/Lotomania, rate-limit 1s, retry com backoff; endpoint `/0` instável → busca binária do último concurso)
+- [x] Backend: estatísticas (frequência, atraso, quentes/frias, pares comuns, acumulados) + procedimento tRPC (`loterias` router: list, counts, collectStatus, collect, stats, bet)
+- [x] Backend: geração estatística de apostas (simulação ponderada freq/atraso/aleatório com PRNG determinístico — com disclaimer de aleatoriedade)
+- [x] Frontend: página /loterias com seletor de loteria, KPIs (sorteios, último concurso, prêmio estimado, acumulados), últimos sorteios com dezenas, gráficos de frequência e atraso (Recharts), pares comuns, listas quentes/frias/em atraso e gerador estatístico de apostas com disclaimer
+- [x] Vitest coverage da Fase 22 (estatísticas, validação de dezenas, geração de apostas — 18/18 testes passando)
+- [x] README.md com seção Fase 22 (tabela de capacidades, coleta agendada, aviso estatístico)
+- [ ] Sync GitHub (branch sync-fase22b + PR #11)

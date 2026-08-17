@@ -8,8 +8,9 @@ import {
   userProfiles, missionWebhooks, inAppNotifications, userAchievements,
   projectCollaborations, collaborationMessages, pluginVerifications,
   pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
+  lotteryDraws,
   type WebhookEvent,
-  type InsertUser, type InsertProjectShare
+  type InsertUser, type InsertProjectShare, type InsertLotteryDraw
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1780,3 +1781,63 @@ export async function upsertLlmSettings(userId: number, patch: Partial<typeof us
   if (!db) throw new Error("Banco indisponível");
   await db.insert(userLlmSettings).values({ userId, ...patch } as any).onDuplicateKeyUpdate({ set: patch as any });
 }
+
+// Fase 22: loterias — persistência com dedup (unique index lotteryType+drawNumber)
+export async function insertLotteryDraw(draw: InsertLotteryDraw): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const res = await db
+    .insert(lotteryDraws)
+    .values(draw as typeof lotteryDraws.$inferInsert)
+    .onDuplicateKeyUpdate({ set: { collectedAt: new Date() } })
+    .execute();
+  // mysql2 insert result: [ResultSetHeader]
+  const header = Array.isArray(res) ? res[0] : res;
+  return (header as { affectedRows?: number }).affectedRows ?? 0;
+}
+
+export async function listLotteryDraws(type: string, limit: number = 100): Promise<LotteryDrawRow[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const rows = await db
+    .select({
+      id: lotteryDraws.id,
+      lotteryType: lotteryDraws.lotteryType,
+      drawNumber: lotteryDraws.drawNumber,
+      drawDate: lotteryDraws.drawDate,
+      numbers: lotteryDraws.numbers,
+      accumulatedPrize: lotteryDraws.accumulatedPrize,
+      estimatedNextPrize: lotteryDraws.estimatedNextPrize,
+      winners: lotteryDraws.winners,
+      collectedAt: lotteryDraws.collectedAt,
+    })
+    .from(lotteryDraws)
+    .where(eq(lotteryDraws.lotteryType, type))
+    .orderBy(asc(lotteryDraws.drawNumber))
+    .limit(limit);
+  return rows as LotteryDrawRow[];
+}
+
+export async function countLotteryDraws(type: string): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(lotteryDraws)
+    .where(eq(lotteryDraws.lotteryType, type))
+    .execute();
+  const r = Array.isArray(rows) ? rows[0] : rows;
+  return Number((r as { c?: number }).c ?? 0);
+}
+
+export type LotteryDrawRow = {
+  id: number;
+  lotteryType: string;
+  drawNumber: number;
+  drawDate: string | null;
+  numbers: number[];
+  accumulatedPrize: string;
+  estimatedNextPrize: string;
+  winners: unknown;
+  collectedAt: Date;
+};

@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, float, boolean, datetime, customType } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, float, boolean, datetime, customType, json, date, uniqueIndex, index } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -359,3 +359,26 @@ export const webhookEvents = mysqlTable("webhookEvents", {
 
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type InsertWebhookEvent = typeof webhookEvents.$inferInsert;
+
+// Fase 22: resultados oficiais das loterias da Caixa
+export const lotteryDraws = mysqlTable("lotteryDraws", {
+  id: int("id").autoincrement().primaryKey(),
+  // megasena / quina / lotofacil / lotomania / timemania
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  // número do concurso (ex.: 3044)
+  drawNumber: int("drawNumber").notNull(),
+  drawDate: varchar("drawDate", { length: 10 }),
+  // dezenas sorteadas (JSON: [4, 15, 17, 40, 55, 58])
+  numbers: json("numbers").notNull(),
+  accumulatedPrize: varchar("accumulatedPrize", { length: 20 }).default("0"),
+  estimatedNextPrize: varchar("estimatedNextPrize", { length: 20 }).default("0"),
+  winners: json("winners"),
+  collectedAt: timestamp("collectedAt").defaultNow().notNull(),
+}, (t) => ({
+  // dedup: uma linha por (loteria, concurso)
+  uniqDraw: uniqueIndex("uniq_draw").on(t.lotteryType, t.drawNumber),
+  idxType: index("idx_type").on(t.lotteryType),
+  idxDrawNumber: index("idx_draw_number").on(t.drawNumber),
+}));
+export type LotteryDraw = typeof lotteryDraws.$inferSelect;
+export type InsertLotteryDraw = typeof lotteryDraws.$inferInsert;

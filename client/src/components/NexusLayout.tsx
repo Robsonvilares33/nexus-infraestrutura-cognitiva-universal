@@ -5,7 +5,7 @@ import { Link, useLocation } from "wouter";
 import {
   Home, Globe, Brain, Plug, Database, Bot, Cpu, Folder, Settings, Activity, FileText,
   BarChart3, MessageSquare, Package, ShieldCheck, Bell, Trophy, Zap, Radio,
-  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2, AlertTriangle
+  LogIn, LogOut, User, ChevronLeft, ChevronRight, Menu, Sun, Moon, UserCircle2, AlertTriangle, TrendingUp
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { path: "/projetos", label: "Projetos", icon: Folder },
   { path: "/config", label: "Config", icon: Settings },
   { path: "/webhooks", label: "Webhooks", icon: Radio },
+  { path: "/loterias", label: "Loterias", icon: TrendingUp },
   { path: "/status", label: "Status", icon: Activity },
   { path: "/docs", label: "Docs", icon: FileText },
   { path: "/analytics", label: "Analytics", icon: BarChart3 },
