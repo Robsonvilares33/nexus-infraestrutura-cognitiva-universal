@@ -1021,3 +1021,137 @@ export function warmupAlerts(type: LotteryType, draws: LotteryDraw[]): {
 
   return { numbers };
 }
+
+// ---------- Fase 28: simulador de aposta manual e relatório semanal ----------
+/**
+ * Avalia uma aposta manual fixa do usuário contra todo o histórico coletado.
+ * Para cada concurso a partir do 12º (com histórico mínimo), conta os hits da
+ * aposta contra o resultado real e compara com um baseline aleatório determinístico
+ * (mesma semente do backtest por método) para referência.
+ */
+export function simulateBet(
+  type: LotteryType,
+  draws: LotteryDraw[],
+  numbers: number[],
+  opts: { limit?: number; seed?: number } = {},
+): {
+  numbers: number[];
+  maxHits: number;
+  avgHits: number;
+  contests: number;
+  hitsHistory: { drawNumber: number; drawDate: string | null; hits: number }[];
+  baselineAvgHits: number;
+  baselineAbove: number;
+  disclaimer: string;
+} {
+  const sorted = [...draws].sort((a, b) => a.drawNumber - b.drawNumber);
+  const minHistory = 12;
+  const rows = opts.limit ? sorted.slice(-opts.limit) : sorted;
+  const evalRows = rows.slice(minHistory);
+  const toNumbers = (n: unknown): number[] => (Array.isArray(n) ? (n.filter((v) => typeof v === "number") as number[]) : []);
+  const size = LOTTERY_DRAW_SIZE[type];
+  const maxNumber = LOTTERY_MAX_NUMBER[type];
+
+  let totalHits = 0;
+  let baselineTotal = 0;
+  let baselineAbove = 0;
+  const hitsHistory: { drawNumber: number; drawDate: string | null; hits: number }[] = [];
+  const random = mulberry32ForStats(opts.seed ?? 20260816);
+
+  for (const row of evalRows) {
+    const truthNumbers = toNumbers(row.numbers);
+    const hits = checkBetHits(numbers, truthNumbers) ?? 0;
+    totalHits += hits;
+    hitsHistory.push({ drawNumber: row.drawNumber, drawDate: row.drawDate ?? null, hits });
+    const rnd = Array.from({ length: size }, () => Math.floor(random() * maxNumber) + 1);
+    const baselineBet = Array.from(new Set(rnd)).slice(0, size);
+    if (baselineBet.length === size) {
+      const baselineHits = checkBetHits(baselineBet, truthNumbers) ?? 0;
+      baselineTotal += baselineHits;
+      if (baselineHits < hits) baselineAbove += 1;
+    }
+  }
+
+  const contests = evalRows.length;
+  return {
+    numbers,
+    maxHits: hitsHistory.reduce((m, h) => Math.max(m, h.hits), 0),
+    avgHits: contests > 0 ? totalHits / contests : 0,
+    contests,
+    hitsHistory: hitsHistory.slice(-20),
+    baselineAvgHits: contests > 0 ? baselineTotal / contests : 0,
+    baselineAbove,
+    disclaimer: "Simulação sobre o histórico real — sorteios são aleatórios; desempenho passado não prevê resultados futuros.",
+  };
+}
+
+/**
+ * Monta o payload do relatório semanal de loterias: dezenas em aquecimento,
+ * lista de confiança do backtest e taxa de acerto média por método.
+ */
+export function weeklyReportPayload(
+  drawsByType: Record<LotteryType, LotteryDraw[]>,
+  weightsByType: Partial<Record<LotteryType, LstmWeights>>,
+  opts: { limit?: number } = {},
+): {
+  sections: Record<string, {
+    warmups: { number: number; freq30: number; freq90: number; deltaFactor: number }[];
+    confidenceList: { number: number; score: number; hitRate: number }[];
+    methodRates: Record<string, { avgHits: number; contests: number }>;
+  }>;
+  disclaimer: string;
+} {
+  const sections: Record<string, NonNullable<ReturnType<typeof weeklyReportPayload>["sections"][string]>> = {};
+  const limit = opts.limit ?? 2000;
+  for (const type of LOTTERY_TYPES as LotteryType[]) {
+    const draws = (drawsByType[type] ?? []).slice(-limit);
+    if (draws.length < 12) continue;
+    const warmups = warmupAlerts(type, draws).numbers.slice(0, 10);
+    const weights = weightsByType[type] ?? null;
+    const ranking = backtestNumberRanking(type, draws, weights, { limit, top: 15 });
+    const bt = backtestByMethod(type, draws, weights, { limit });
+    sections[LOTTERY_LABELS[type]] = {
+      warmups,
+      confidenceList: ranking.combined.slice(0, 15),
+      methodRates: Object.fromEntries(Object.entries(bt.methods).map(([k, v]) => [k, { avgHits: v.avgHits, contests: v.contests }])),
+    };
+  }
+  return {
+    sections,
+    disclaimer: "Relatório estatístico — sorteios são aleatórios; as análises não garantem acertos futuros.",
+  };
+}
+
+/**
+ * Persiste os eventos de aquecimento detectados agora: insere apenas dezenas
+ * que ainda não constam no histórico persistido no mesmo dia (dedup diário).
+ * Retorna os eventos novos inseridos.
+ */
+export async function persistWarmupEvents(
+  type: LotteryType,
+  draws: LotteryDraw[],
+): Promise<Array<{ lotteryType: string; number: number; freq30: number; freq90: number; deltaFactor: string }>> {
+  const detected = warmupAlerts(type, draws).numbers;
+  if (detected.length === 0) return [];
+  const { listLotteryWarmupEvents, insertLotteryWarmupEvent } = await import("./db");
+  const existing = await listLotteryWarmupEvents(type, 200);
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const existingToday = new Set(existing.filter((e) => new Date(e.detectedAt).toISOString().slice(0, 10) === todayKey).map((e) => e.number));
+  const newEvents = detected.filter((d) => !existingToday.has(d.number));
+  for (const d of newEvents) {
+    await insertLotteryWarmupEvent({
+      lotteryType: type,
+      number: d.number,
+      freq30: d.freq30,
+      freq90: d.freq90,
+      deltaFactor: String(d.deltaFactor ?? 0),
+    });
+  }
+  return newEvents.map((d) => ({
+    lotteryType: type,
+    number: d.number,
+    freq30: d.freq30,
+    freq90: d.freq90,
+    deltaFactor: String(d.deltaFactor ?? 0),
+  }));
+}

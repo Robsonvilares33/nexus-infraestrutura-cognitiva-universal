@@ -58,6 +58,23 @@ const LOTTERY_COLORS: Record<LotteryType, string> = {
   timemania: "#000000",
 };
 
+
+const LOTTERY_SIZES: Record<LotteryType, number> = {
+  megasena: 6,
+  quina: 5,
+  lotofacil: 15,
+  lotomania: 50,
+  timemania: 7,
+};
+
+const LOTTERY_MAX: Record<LotteryType, number> = {
+  megasena: 60,
+  quina: 80,
+  lotofacil: 25,
+  lotomania: 100,
+  timemania: 80,
+};
+
 export default function Loterias() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
@@ -87,6 +104,24 @@ export default function Loterias() {
     { enabled: !!stats },
   );
 
+  // ---------- Fase 28: histórico de aquecimentos, simulador e relatório ----------
+  const warmupHistoryMutation = trpc.loterias.warmupHistory.useMutation();
+  const { data: allWarmupHistory, refetch: refetchWarmupHistory } = trpc.loterias.warmupEvents.useQuery(undefined, {
+    refetchInterval: 60000,
+  });
+  const isNewWarmup = (e: { detectedAt: string | Date | null; lotteryType: string; number: number }): boolean => {
+    if (!e.detectedAt) return false;
+    const d = new Date(e.detectedAt);
+    return Date.now() - d.getTime() < 7 * 24 * 60 * 60 * 1000;
+  };
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const { data: weeklyReport } = trpc.loterias.weeklyReport.useQuery({}, { enabled: !!stats });
+  const [simNumbers, setSimNumbers] = useState<number[]>([]);
+  const { data: simResult, refetch: refetchSim } = trpc.loterias.simulateBet.useQuery(
+    { type: lottery, numbers: simNumbers },
+    { enabled: simNumbers.length === LOTTERY_SIZES[lottery] && simNumbers.every((n) => n >= 1 && n <= LOTTERY_MAX[lottery]) },
+  );
+
   // ---------- Fase 27: ranking de dezenas do backtest + alerta de aquecimento ----------
   const { data: numberRanking, isLoading: rankingLoading } = trpc.loterias.numberRanking.useQuery(
     { type: lottery },
@@ -108,6 +143,38 @@ export default function Loterias() {
       .sort((a, b) => a.number - b.number)
       .map((f) => ({ name: String(f.number), "30d": f.frequency, "90d": by90.get(f.number) ?? 0 }));
   }, [stats30, stats90]);
+
+
+  const handleToggleSimNumber = (n: number) => {
+    setSimNumbers((prev) => {
+      if (prev.includes(n)) return prev.filter((x) => x !== n);
+      if (prev.length >= LOTTERY_SIZES[lottery]) {
+        toast.info(`A ${LOTTERY_LABELS[lottery]} usa exatamente ${LOTTERY_SIZES[lottery]} dezenas`);
+        return prev;
+      }
+      return [...prev, n].sort((a, b) => a - b);
+    });
+  };
+
+  const handlePersistWarmup = async (type: LotteryType) => {
+    if (!user) {
+      toast.error("Faça login para registrar alertas de aquecimento");
+      return;
+    }
+    try {
+      const res = await warmupHistoryMutation.mutateAsync({ type, persist: true });
+      if (res.newEvents.length > 0) {
+        toast.success(`🔥 ${res.newEvents.length} dezena(s) nova(s) em aquecimento na ${LOTTERY_LABELS[type]} — notificação enviada.`);
+      } else {
+        toast.info(`Nenhuma dezena nova em aquecimento na ${LOTTERY_LABELS[type]} no momento.`);
+      }
+      await utils.loterias.warmupEvents.invalidate();
+      await utils.loterias.warmupAlerts.invalidate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao registrar os aquecimentos");
+    }
+  };
+
   const collectHistoryMutation = trpc.loterias.collectHistory.useMutation();
   const trainModelMutation = trpc.loterias.trainModel.useMutation();
 
@@ -614,6 +681,88 @@ export default function Loterias() {
             </CardContent>
           </Card>
 
+          {/* Fase 28: simulador de aposta manual contra o backtest */}
+          <Card className="bg-[#0a0d1a] border-[#7cff9f]/20">
+            <CardHeader>
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-[#7cff9f]" /> Simulador de aposta — {LOTTERY_LABELS[lottery]}
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Monte uma aposta manual (exatamente {LOTTERY_SIZES[lottery]} dezenas de 1 a {LOTTERY_MAX[lottery]}) e veja instantaneamente como ela teria performado contra cada concurso real do histórico — com a média do baseline aleatório para referência.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="flex flex-wrap gap-1.5">
+                  {Array.from({ length: LOTTERY_MAX[lottery] }, (_, i) => i + 1).map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => void handleToggleSimNumber(n)}
+                      className={`inline-flex items-center justify-center w-9 h-9 rounded-full text-xs font-bold transition-all ${
+                        simNumbers.includes(n)
+                          ? "text-black shadow-[0_0_10px_rgba(124,243,255,0.4)]"
+                          : "border border-white/15 bg-white/5 text-white/60 hover:border-[#7cf3ff]/40 hover:text-white"
+                      }`}
+                      style={simNumbers.includes(n) ? { background: LOTTERY_COLORS[lottery] || NEXUS_CYAN } : undefined}
+                      title={String(n).padStart(2, "0")}
+                    >
+                      {String(n).padStart(2, "0")}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs text-white/50">
+                  <span>
+                    Selecionadas: <strong className="text-white font-mono">{simNumbers.length}/{LOTTERY_SIZES[lottery]}</strong>
+                  </span>
+                  <span className="text-[10px] text-[#ffd479]/80">
+                    {simNumbers.length !== LOTTERY_SIZES[lottery] ? `Faltam ${LOTTERY_SIZES[lottery] - simNumbers.length} dezenas para simular` : "Simulação automática contra os concursos reais"}
+                  </span>
+                </div>
+              </div>
+              {simNumbers.length === LOTTERY_SIZES[lottery] && (simResult ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                      <div className="text-xs text-white/50">Média de acertos</div>
+                      <div className="mt-1 font-mono text-lg font-bold text-[#7cff9f]">{simResult.avgHits.toFixed(2)}</div>
+                      <div className="text-[10px] text-white/40">em {simResult.contests} concursos avaliados</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                      <div className="text-xs text-white/50">Melhor concurso</div>
+                      <div className="mt-1 font-mono text-lg font-bold text-[#7cf3ff]">{simResult.maxHits} hits</div>
+                      <div className="text-[10px] text-white/40">acertos máximos em um único sorteio</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                      <div className="text-xs text-white/50">Média do baseline</div>
+                      <div className="mt-1 font-mono text-lg font-bold text-[#ff6b6b]">{simResult.baselineAvgHits.toFixed(2)}</div>
+                      <div className="text-[10px] text-white/40">média de 1.000 apostas aleatórias</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                      <div className="text-xs text-white/50">Acima do baseline</div>
+                      <div className="mt-1 font-mono text-lg font-bold text-[#ffd479]">{((simResult.baselineAbove / Math.max(simResult.contests, 1)) * 100).toFixed(1)}%</div>
+                      <div className="text-[10px] text-white/40">concorssos em que a aposta superou o aleatório</div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                    <div className="text-xs font-semibold text-[#c9b8ff] uppercase tracking-wide mb-2">Evolução de acertos (últimos 20 concursos)</div>
+                    <ResponsiveContainer width="100%" height={150}>
+                      <LineChart data={simResult.hitsHistory.slice(-20)}>
+                        <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                        <XAxis dataKey="drawNumber" stroke="rgba(255,255,255,0.4)" tick={{ fontSize: 10 }} />
+                        <YAxis stroke="rgba(255,255,255,0.4)" tick={{ fontSize: 10 }} allowDecimals={false} />
+                        <Tooltip contentStyle={{ background: "#0a0d1a", border: "1px solid rgba(255,255,255,0.1)", fontSize: 12 }} />
+                        <Line type="monotone" dataKey="hits" stroke={NEXUS_CYAN} strokeWidth={2} dot={{ r: 2, fill: NEXUS_CYAN }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-[11px] text-[#ffd479]/80">{simResult.disclaimer}</p>
+                </div>
+              ) : (
+                <Skeleton className="h-24 bg-white/5" />
+              ))}
+            </CardContent>
+          </Card>
+
           {/* Fase 25: painel de previsões LSTM */}
           <Card className="bg-[#0a0d1a] border-[#c9b8ff]/30">
             <CardHeader>
@@ -698,6 +847,100 @@ export default function Loterias() {
                   )}
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Fase 28: linha do tempo de alertas de aquecimento */}
+          <Card className="bg-[#0a0d1a] border-[#ffd479]/20">
+            <CardHeader>
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <Flame className="w-4 h-4 text-[#ffd479]" /> Linha do tempo de aquecimentos
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Dezenas frias nos 90 dias que "acenderam" (viraram quentes nos 30 dias) — registradas a cada coleta. Selecione a loteria e clique em Registrar para verificar e disparar a notificação in-app quando houver novidade.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {(Object.keys(LOTTERY_LABELS) as LotteryType[]).map((t) => (
+                  <Button
+                    key={t}
+                    variant="outline"
+                    size="sm"
+                    className="border-[#ffd479]/40 text-[#ffd479] hover:bg-[#ffd479]/10"
+                    onClick={() => void handlePersistWarmup(t)}
+                    disabled={warmupHistoryMutation.isPending}
+                  >
+                    {warmupHistoryMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bell className="w-3 h-3" />}
+                    Registrar {LOTTERY_LABELS[t]}
+                  </Button>
+                ))}
+              </div>
+              {(() => {
+                return (
+                  <div className="max-h-64 overflow-y-auto space-y-1.5">
+                    {(allWarmupHistory?.events ?? []).length === 0 ? (
+                      <p className="text-sm text-white/50">Nenhum aquecimento registrado ainda — os eventos surgem quando a coleta diária ou o botão "Registrar" detecta dezenas frias que viraram quentes.</p>
+                    ) : (
+                      (allWarmupHistory?.events ?? []).map((e: { id: number; lotteryType: string; number: number; detectedAt: string | Date | null; freq90: number; freq30: number; deltaFactor: string }, i: number) => (
+                        <div
+                          key={e.id}
+                          className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-xs ${
+                            isNewWarmup(e)
+                              ? "border-[#ffd479]/60 bg-[#ffd479]/10"
+                              : "border-white/10 bg-white/5"
+                          }`}
+                        >
+                          <span className="font-mono text-white/60">#{String(i + 1).padStart(2, "0")}</span>
+                          <Badge
+                            variant="outline"
+                            className={`border-white/20 text-[10px] ${isNewWarmup(e) ? "border-[#ffd479]/60 text-[#ffd479]" : "border-white/20 text-white/60"}`}
+                          >
+                            {LOTTERY_LABELS[e.lotteryType as LotteryType] ?? e.lotteryType}
+                          </Badge>
+                          <span
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-bold text-black"
+                            style={{ background: LOTTERY_COLORS[e.lotteryType as LotteryType] || NEXUS_CYAN }}
+                          >
+                            {String(e.number).padStart(2, "0")}
+                          </span>
+                          <span className="text-white/40">
+                            {e.detectedAt ? new Date(e.detectedAt).toLocaleString("pt-BR") : "—"}
+                          </span>
+                          <span className="text-[10px] text-white/40 ml-auto">
+                            freq 90d: {e.freq90} → 30d: {e.freq30} · Δ {parseFloat(e.deltaFactor || "0").toFixed(2)}x
+                          </span>
+                          {isNewWarmup(e) && <Flame className="w-3 h-3 text-[#ffd479]" />}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                );
+              })()}
+              <p className="text-[11px] text-[#ffd479]/80">Persistência na base {allWarmupHistory?.events.length ?? 0} eventos (últimos 60) — a missão diária e o botão Registrar disparam a notificação in-app quando uma dezena nova acende.</p>
+            </CardContent>
+          </Card>
+
+          {/* Fase 28: relatório da semana */}
+          <Card className="bg-[#0a0d1a] border-[#7cf3ff]/20">
+            <CardHeader>
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <Timer className="w-4 h-4 text-[#7cf3ff]" /> Relatório da semana — todas as loterias
+              </CardTitle>
+              <CardDescription className="text-white/50">
+                Consolidação automática (domingo ~06h10 BRT via missão agendada): dezenas em aquecimento, lista de confiança por método e taxa média de acerto de cada método por loteria.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#7cf3ff]/40 text-[#7cf3ff] hover:bg-[#7cf3ff]/10"
+                onClick={() => setReportDialogOpen(true)}
+                disabled={!weeklyReport}
+              >
+                Abrir relatório da semana
+              </Button>
             </CardContent>
           </Card>
 
@@ -858,6 +1101,70 @@ export default function Loterias() {
               </Card>
             </TabsContent>
           </Tabs>
+
+          {/* Fase 28: Dialog do relatório da semana */}
+          <Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+            <DialogContent className="max-w-3xl bg-[#0a0d1a] border-white/10 max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="text-white flex items-center gap-2">
+                  <Timer className="w-5 h-5 text-[#7cf3ff]" /> Relatório da semana — Loterias NEXUS
+                </DialogTitle>
+                <DialogDescription className="text-white/50">
+                  Resumo semanal consolidado: dezenas em aquecimento (30d quente / 90d fria), lista de confiança combinada e taxa média de acerto de cada método no backtest real.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                {Object.entries(weeklyReport?.sections ?? {}).map(([label, section]) => (
+                  <Card key={label} className="bg-white/5 border-white/10">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-white text-sm">{label}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 pt-0">
+                      <div>
+                        <span className="text-xs font-semibold text-[#ffd479] uppercase tracking-wide">🔥 Em aquecimento</span>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {section.warmups.length === 0 ? (
+                            <span className="text-xs text-white/50">nenhuma dezena em aquecimento nesta loteria</span>
+                          ) : (
+                            section.warmups.map((w) => (
+                              <span key={w.number} className="inline-flex items-center gap-1 rounded-full border border-[#ffd479]/60 bg-[#ffd479]/15 px-2.5 py-1 text-xs font-bold text-[#ffd479]">
+                                {String(w.number).padStart(2, "0")}
+                                <span className="text-[9px] font-mono opacity-70">Δ{parseFloat(String(w.deltaFactor)).toFixed(2)}x</span>
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-[#7cff9f] uppercase tracking-wide">Lista de confiança</span>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {section.confidenceList.slice(0, 15).map((c) => (
+                            <span key={c.number} className="inline-flex items-center gap-1 rounded-full border border-[#7cff9f]/40 bg-[#7cff9f]/10 px-2.5 py-1 text-xs font-bold text-[#7cff9f]">
+                              {String(c.number).padStart(2, "0")}
+                              <span className="text-[9px] font-mono opacity-70">{(c.hitRate * 100).toFixed(0)}%</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-[#7cf3ff] uppercase tracking-wide">Métodos (média de acertos no backtest)</span>
+                        <div className="mt-1.5 grid grid-cols-2 lg:grid-cols-4 gap-2">
+                          {Object.entries(section.methodRates).map(([k, v]) => (
+                            <div key={k} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                              <div className="text-[10px] text-white/50">{k === "lstm" ? "LSTM" : k === "blend" ? "LSTM + estatístico" : k === "estatistico" ? "Estatístico" : "Aleatório"}</div>
+                              <div className="mt-0.5 font-mono text-sm font-bold text-[#7cf3ff]">{v.avgHits.toFixed(2)}</div>
+                              <div className="text-[9px] text-white/40">{v.contests} concursos</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                <p className="text-[11px] text-[#ffd479]/80">{weeklyReport?.disclaimer ?? "Análise estatística do histórico real da Caixa — nenhum método altera a probabilidade matemática de acerto."}</p>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {/* Painel de alertas de acumulado (Fase 23) */}
           <Card className="bg-[#0a0d1a] border-white/10">

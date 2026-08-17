@@ -155,6 +155,13 @@
       "when": 1786932939277,
       "tag": "0021_bouncy_excalibur",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1786935550556,
+      "tag": "0022_yellow_dazzler",
+      "breakpoints": true
     }
   ]
 }

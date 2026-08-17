@@ -312,3 +312,13 @@ A Fase 27 fecha o ciclo de validação do módulo de Loterias com três recursos
 3. **Alerta de aquecimento** (`warmupAlerts` + endpoint `loterias.warmupAlerts`): detecta dezenas que são frias no passado anterior aos últimos 30 dias mas passaram a quentes nos últimos 30 dias, com fator delta de frequência proporcional. Badge no card de comparação de períodos e seção na página.
 
 `drawsWithinDays` agora aceita tanto o formato DD/MM/YYYY (dados reais da Caixa) quanto ISO (testes sintéticos). Suíte de testes: 193/195 no total (2 falhas externas conhecidas por cota LLM 412, sem relação com loterias); 56/56 no arquivo de loterias.
+
+## Fase 28: Loterias NEXUS — histórico de alertas de aquecimento, simulador de aposta e relatório semanal automatizado
+
+A Fase 28 adiciona persistência, interatividade e automação ao ciclo de inteligência das loterias.
+
+1. **Histórico de alertas de aquecimento persistido**: tabela `lotteryWarmupEvents` (Migration 0022) armazena cada evento de aquecimento detectado por `persistWarmupEvents`, com dedup por chave do dia (um mesmo número não gera evento duplicado no mesmo dia). A página /loterias exibe uma linha do tempo por loteria e badge de contagem; eventos novos acendem notificação in-app.
+2. **Simulador de aposta** (`simulateBet` + endpoint `loterias.simulateBet`): o usuário monta uma aposta manual e o motor compara cada concurso do histórico real (mínimo 12, sem vazamento do futuro), reportando máximo/média de acertos, histórico por concurso e comparação com o baseline aleatório (mesma aposta aleatória determinística via `mulberry32ForStats`, com semente configurável), informando em quantos concursos a aposta superou a linha de base.
+3. **Relatório semanal automatizado**: endpoint agendado `/api/scheduled/loterias-report` (cron domingo) consolida por loteria os aquecimentos em curso, a lista de confiança do backtest e a taxa de acerto média por método via `weeklyReportPayload`, e envia resumo por notificação in-app ao proprietário. Botão "Ver relatório" na página abre o resumo em diálogo.
+
+A coleta de dados agora também persiste os aquecimentos do dia no fluxo `collectAndPersist`, alimentando a linha do tempo automaticamente a cada coleta. Suíte de testes: 198/200 no total (as 2 falhas seguem sendo as externas por cota LLM 412, sem relação com loterias); 63/63 no arquivo de loterias.

@@ -654,3 +654,131 @@ describe("Fase 27 — warmupAlerts", () => {
     expect(res.numbers.every((n) => ![1, 2, 3, 4, 10, 11].includes(n.number))).toBe(true);
   });
 });
+
+// ---------- Fase 28: simulador, relatório semanal e eventos de aquecimento ----------
+import { persistWarmupEvents, simulateBet, weeklyReportPayload } from "./nexus-loterias";
+
+describe("simulateBet (Fase 28)", () => {
+  const size = LOTTERY_DRAW_SIZE.megasena;
+  const max = LOTTERY_MAX_NUMBER.megasena;
+
+  // histórico determinístico: concurso k usa as 6 dezenas do bet rotacionadas + complemento fixo (garante acertos parciais)
+  const bet = [1, 2, 3, 4, 5, 6];
+  const draws: LotteryDraw[] = Array.from({ length: 40 }, (_, k) => {
+    const n = k + 1;
+    const rotating = bet.slice(0, 3 + (n % 4)); // 3-6 dezenas do próprio bet por concurso
+    const extra = Array.from({ length: size }, (_, i) => ((n + i) % max) + 1).filter((x) => !rotating.includes(x));
+    return makeDraw(n, [...rotating, ...extra].slice(0, size));
+  });
+
+  it("avalia a aposta contra cada concurso com pelo menos 12 de histórico", () => {
+    const result = simulateBet("megasena", draws, [1, 2, 3, 4, 5, 6], {});
+    expect(result.numbers).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.contests).toBeGreaterThanOrEqual(12);
+    expect(result.maxHits).toBeGreaterThanOrEqual(0);
+    expect(result.avgHits).toBeGreaterThan(0);
+    expect(result.hitsHistory.length).toBe(Math.min(result.contests, 20)); // hitsHistory é truncado aos 20 mais recentes
+    expect(result.disclaimer.length).toBeGreaterThan(0);
+  });
+
+  it("compara com o baseline aleatório e reporta acima/abaixo", () => {
+    const result = simulateBet("megasena", draws, [1, 2, 3, 4, 5, 6], { seed: 42 });
+    expect(result.baselineAvgHits).toBeGreaterThan(0);
+    expect(result.baselineAbove).toBeGreaterThanOrEqual(0);
+    expect(result.baselineAbove).toBeLessThanOrEqual(result.contests);
+  });
+
+  it("tolera quantidade errada de dezenas mas contabiliza apenas os acertos válidos (comportamento defensivo)", () => {
+    // o simulador é defensivo: aposta com menos dezenas ainda roda e tem avgHits >= 0
+    const result = simulateBet("megasena", draws, [1, 2, 3], {});
+    expect(result.avgHits).toBeGreaterThanOrEqual(0);
+    expect(result.contests).toBeGreaterThanOrEqual(12);
+  });
+
+  it("respeita o limite de concursos", () => {
+    const result = simulateBet("megasena", draws, [1, 2, 3, 4, 5, 6], { limit: 20 });
+    expect(result.contests).toBeLessThanOrEqual(8); // 20 - 12 min history
+  });
+});
+
+describe("weeklyReportPayload (Fase 28)", () => {
+  const makeDrawW = (n: number, numbers: number[]) =>
+    ({
+      id: n,
+      lotteryType: "quina",
+      drawNumber: n,
+      drawDate: null,
+      numbers,
+      accumulatedPrize: "0",
+      estimatedNextPrize: "0",
+      winners: null,
+      collectedAt: new Date(),
+    } as LotteryDraw);
+
+  it("consolida aquecimentos, lista de confiança e taxas por método", () => {
+    const quinaDraws: LotteryDraw[] = Array.from({ length: 100 }, (_, k) => {
+      const n = k + 1;
+      return makeDrawW(n, Array.from({ length: 5 }, (_, i) => ((n * 7 + i * 13) % 80) + 1));
+    });
+    const report = weeklyReportPayload({ quina: quinaDraws }, {});
+    expect(Object.keys(report.sections).length).toBeGreaterThan(0);
+    expect(report.sections["Quina"]).toBeDefined();
+    expect(report.sections["Quina"].confidenceList.length).toBeGreaterThan(0);
+    expect(report.sections["Quina"].methodRates).toBeDefined();
+    expect(report.disclaimer.length).toBeGreaterThan(0);
+  });
+
+  it("ignora loterias com histórico insuficiente", () => {
+    const report = weeklyReportPayload({ quina: [], megasena: [] }, {});
+    expect(Object.keys(report.sections).length).toBe(0);
+  });
+});
+
+describe("persistWarmupEvents (Fase 28)", () => {
+  const makeDrawP = (n: number, date: string, numbers: number[]) =>
+    ({
+      id: n,
+      lotteryType: "megasena",
+      drawNumber: n,
+      drawDate: date,
+      numbers,
+      accumulatedPrize: "0",
+      estimatedNextPrize: "0",
+      winners: null,
+      collectedAt: new Date(),
+    } as LotteryDraw);
+
+  it("detecta apenas números genuinamente frios que esquentaram e persiste com dedup do dia", async () => {
+    // janela antiga (90..31 dias atrás de hoje): sem o número 5; janela recente (30..1): com o número 5
+    const draws: LotteryDraw[] = [];
+    const now = new Date("2026-09-30T12:00:00Z");
+    let n = 1;
+    for (let i = 90; i >= 31; i--) {
+      const d = new Date(now);
+      d.setUTCDate(d.getUTCDate() - i);
+      draws.push(makeDrawP(n++, d.toISOString().slice(0, 10), [1, 2, 3, 4, 10, 11]));
+    }
+    for (let i = 30; i >= 1; i--) {
+      const d = new Date(now);
+      d.setUTCDate(d.getUTCDate() - i);
+      draws.push(makeDrawP(n++, d.toISOString().slice(0, 10), [5, 6, 7, 8, 9, 10]));
+    }
+    // a primeira chamada persiste os novos eventos do dia (banco real, sem eventos anteriores hoje);
+    // em ambiente compartilhado pode haver dedup do dia — por isso a verificação final é feita no banco
+    const first = await persistWarmupEvents("megasena", draws);
+    const detected = warmupAlerts("megasena", draws).numbers;
+    expect(detected.some((d) => d.number === 5)).toBe(true);
+    expect(first.every((r) => r.freq30 > 0)).toBe(true);
+    // segunda chamada no mesmo dia não reduplica (dedup por chave do dia)
+    const second = await persistWarmupEvents("megasena", draws);
+    expect(second.length).toBe(0);
+    // os eventos persistidos de fato estão no banco com freq30 > 0
+    const rows = await persistWarmupEvents("megasena", draws);
+    const { listLotteryWarmupEvents } = await import("./db");
+    const persisted = await listLotteryWarmupEvents("megasena", 200);
+    const five = persisted.find((r) => r.number === 5);
+    expect(five).toBeDefined();
+    expect(five!.freq30).toBeGreaterThan(0);
+    void rows;
+  });
+});

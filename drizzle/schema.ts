@@ -455,3 +455,24 @@ export const lotteryModels = mysqlTable("lotteryModels", {
 }));
 export type LotteryModel = typeof lotteryModels.$inferSelect;
 export type InsertLotteryModel = typeof lotteryModels.$inferInsert;
+
+// Fase 28: histórico de eventos de aquecimento de dezenas (fria nos 90d → quente nos 30d)
+export const lotteryWarmupEvents = mysqlTable("lotteryWarmupEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  // megasena / quina / lotofacil / lotomania / timemania
+  lotteryType: varchar("lotteryType", { length: 16 }).notNull(),
+  // dezena que aqueceu
+  number: int("number").notNull(),
+  // frequência da dezena nos últimos 30 dias
+  freq30: int("freq30").default(0).notNull(),
+  // frequência da dezena na janela de 90 dias (inclui os 30 dias)
+  freq90: int("freq90").default(0).notNull(),
+  // fator delta de frequência proporcional (rate30/rate90)
+  deltaFactor: varchar("deltaFactor", { length: 20 }).default("0").notNull(),
+  detectedAt: timestamp("detectedAt").defaultNow().notNull(),
+}, (t) => ({
+  idxType: index("idx_warmup_type").on(t.lotteryType),
+  idxDetected: index("idx_warmup_detected").on(t.detectedAt),
+}));
+export type LotteryWarmupEvent = typeof lotteryWarmupEvents.$inferSelect;
+export type InsertLotteryWarmupEvent = typeof lotteryWarmupEvents.$inferInsert;

@@ -9,11 +9,12 @@ import {
   projectCollaborations, collaborationMessages, pluginVerifications,
   pluginThreads, xpEvents, missionTemplates, missionSteps, webhookEvents,
   lotteryDraws, lotteryBets, lotteryAlerts,
-  lotteryCollectJobs, lotteryModels,
+  lotteryCollectJobs, lotteryModels, lotteryWarmupEvents,
   type WebhookEvent,
   type InsertUser, type InsertProjectShare, type InsertLotteryDraw,
   type InsertLotteryBet, type InsertLotteryAlert,
-  type InsertLotteryCollectJob, type InsertLotteryModel
+  type InsertLotteryCollectJob, type InsertLotteryModel,
+  type LotteryWarmupEvent
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -2091,4 +2092,44 @@ export async function listLotteryModels(type?: string): Promise<Array<{ id: numb
     .orderBy(desc(lotteryModels.id))
     .limit(10);
   return rows;
+}
+
+// ---------- Fase 28: histórico de eventos de aquecimento de dezenas ----------
+export type LotteryWarmupEventRow = {
+  id: number;
+  lotteryType: string;
+  number: number;
+  freq30: number;
+  freq90: number;
+  deltaFactor: string;
+  detectedAt: Date;
+};
+export async function insertLotteryWarmupEvent(event: { lotteryType: string; number: number; freq30: number; freq90: number; deltaFactor: string }): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const res = await db
+    .insert(lotteryWarmupEvents)
+    .values({ ...event } as typeof lotteryWarmupEvents.$inferInsert)
+    .execute();
+  const header = Array.isArray(res) ? res[0] : res;
+  return Number((header as { insertId?: number }).insertId ?? 0);
+}
+export async function listLotteryWarmupEvents(type?: string, limit: number = 60): Promise<LotteryWarmupEventRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: lotteryWarmupEvents.id,
+      lotteryType: lotteryWarmupEvents.lotteryType,
+      number: lotteryWarmupEvents.number,
+      freq30: lotteryWarmupEvents.freq30,
+      freq90: lotteryWarmupEvents.freq90,
+      deltaFactor: lotteryWarmupEvents.deltaFactor,
+      detectedAt: lotteryWarmupEvents.detectedAt,
+    })
+    .from(lotteryWarmupEvents)
+    .where(type ? eq(lotteryWarmupEvents.lotteryType, type) : undefined)
+    .orderBy(desc(lotteryWarmupEvents.detectedAt), desc(lotteryWarmupEvents.id))
+    .limit(limit);
+  return rows as LotteryWarmupEventRow[];
 }

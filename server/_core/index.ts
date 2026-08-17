@@ -336,6 +336,76 @@ async function startServer() {
     }
   });
 
+  // Fase 28: relatório semanal de loterias (domingo ~09:10 UTC / 06h10 BRT)
+  app.post("/api/scheduled/loterias-report", async (req, res) => {
+    try {
+      const { sdk } = await import("./sdk");
+      try {
+        await sdk.authenticateRequest(req);
+      } catch {
+        const sessionHeader = req.headers["x-manus-user-session"];
+        if (!sessionHeader || typeof sessionHeader !== "string") {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+        const session = await sdk.verifySession(sessionHeader);
+        if (!session) return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { persistWarmupEvents, weeklyReportPayload, LOTTERY_TYPES, LOTTERY_LABELS, getCachedLstmWeights } = await import("../nexus-loterias");
+      const { listLotteryDraws, listLotteryModels, getUserByOpenId, addInAppNotification } = await import("../db");
+      const { storageGet } = await import("../storage");
+      const summaryLines: string[] = [];
+      const weightsByType: Record<string, any> = {};
+      const drawsByType: Record<string, unknown[]> = {};
+      for (const t of LOTTERY_TYPES) {
+        try {
+          const rows = await listLotteryDraws(t, 2000);
+          if (rows.length < 12) continue;
+          const newEvents = await persistWarmupEvents(t, rows);
+          drawsByType[t] = rows;
+          if (newEvents.length > 0) {
+            summaryLines.push(`🔥 ${LOTTERY_LABELS[t]}: dezenas em aquecimento [${newEvents.map((e) => e.number).join(", ")}]`);
+          }
+          const cached = getCachedLstmWeights(t);
+          if (cached) {
+            weightsByType[t] = cached;
+          } else {
+            const models = await listLotteryModels(t);
+            const ready = models.find((m) => m.status === "ready" && m.weightsKey);
+            if (ready && ready.weightsKey) {
+              try {
+                const url = await storageGet(ready.weightsKey);
+                const r = await fetch(url.url);
+                weightsByType[t] = (await r.json()) ?? null;
+              } catch { /* sem pesos */ }
+            }
+          }
+        } catch { /* loteria individual não deve falhar o relatório */ }
+      }
+      let report = "📊 Relatório semanal de loterias NEXUS\n";
+      if (Object.keys(drawsByType).length > 0) {
+        const payload = weeklyReportPayload(drawsByType as any, weightsByType);
+        for (const [label, section] of Object.entries(payload.sections)) {
+          const top = section.confidenceList.slice(0, 6).map((c) => c.number).join(", ");
+          const lstmRate = section.methodRates["lstm"]?.avgHits?.toFixed(2) ?? "—";
+          const statRate = section.methodRates["estatistico"]?.avgHits?.toFixed(2) ?? "—";
+          report += `\n${label}: confiança [${top}] | média LSTM ${lstmRate} hits | estatístico ${statRate} hits`;
+        }
+        if (summaryLines.length === 0) report += "\n🌡 Nenhuma dezena em aquecimento nesta semana.";
+        else report += "\n" + summaryLines.join("\n");
+      } else {
+        report += "\nHistórico insuficiente (mínimo 12 concursos por loteria).";
+      }
+      try {
+        const owner = await getUserByOpenId(process.env.OWNER_OPEN_ID ?? "");
+        if (owner?.id) {
+          await addInAppNotification(owner.id, "loterias_weekly_report", "📊 Relatório semanal de loterias", report);
+        }
+      } catch { /* notificação não crítica */ }
+      return res.json({ success: true, report });
+    } catch (error) {
+      return res.status(500).json({ error: String(error) });
+    }
+  });
   // Scheduled mission callback endpoint
   app.post("/api/scheduled/mission-*", async (req, res) => {
     try {

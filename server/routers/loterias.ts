@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { countLotteryDraws, deleteLotteryAlert, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs } from "../db";
-import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, backtestNumberRanking, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, startLstmTraining, type LstmWeights, validateNumbers, warmupAlerts } from "../nexus-loterias";
+import { addInAppNotification, countLotteryDraws, deleteLotteryAlert, getUserByOpenId, insertLotteryBet, insertLotteryDraw, listCheckedBetsWithDraws, listLotteryAlerts, listLotteryBets, listLotteryDraws, listLotteryModels, listLotteryWarmupEvents, createLotteryCollectJob, createLotteryModel, setLotteryCollectJobStatus, updateLotteryBet, upsertLotteryAlert, listLotteryCollectJobs } from "../db";
+import { COLLECT_LIMITS, LOTTERY_LABELS, LOTTERY_TYPES, type LotteryType, backtestByMethod, backtestNumberRanking, blendWithStats, buildLstmDataset, checkBetHits, collectAndPersist, computeStats, drawsWithinDays, generateStatisticalBet, getCachedLstmWeights, lstmPredict, mulberry32ForStats, persistWarmupEvents, simulateBet, startLstmTraining, weeklyReportPayload, type LstmWeights, validateNumbers, warmupAlerts } from "../nexus-loterias";
 import { storageGet, storagePut } from "../storage";
 
 // Coleção em andamento (uma coleta por processo, simples)
@@ -350,6 +350,92 @@ export const loteriasRouter = router({
     .query(async ({ input }) => {
       const rows = await listLotteryDraws(input.type, 2000);
       return warmupAlerts(input.type, rows);
+    }),
+
+  // Fase 28: histórico persistido de eventos de aquecimento (com registro de novidades)
+  // Fase 28: leitura dos aquecimentos registrados (linha do tempo)
+  warmupEvents: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES).optional() }).optional())
+    .query(async ({ input }) => {
+      const events = await listLotteryWarmupEvents(input?.type, 60);
+      return { events };
+    }),
+  warmupHistory: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES).optional(), persist: z.boolean().default(false) }))
+    .mutation(async ({ input }) => {
+      let newEvents: Array<{ lotteryType: string; number: number; freq30: number; freq90: number; deltaFactor: string }> = [];
+      if (input.persist && input.type) {
+        const rows = await listLotteryDraws(input.type, 2000);
+        if (rows.length > 0) {
+          newEvents = await persistWarmupEvents(input.type, rows);
+          if (newEvents.length > 0) {
+            try {
+              const owner = await getUserByOpenId(process.env.OWNER_OPEN_ID ?? "");
+              if (owner?.id) {
+                const nums = newEvents.map((e) => e.number).join(", ");
+                await addInAppNotification(
+                  owner.id,
+                  "loterias_warmup",
+                  `🔥 Loterias NEXUS: dezenas em aquecimento na ${LOTTERY_LABELS[input.type]}`,
+                  `Dezenas frias que esquentaram nos últimos 30 dias: [${nums}] (fator delta ${newEvents.map((e) => e.deltaFactor).join("/\n").slice(0, 40)}).`,
+                );
+              }
+            } catch { /* notificação não crítica */ }
+          }
+        }
+      }
+      const rows = await listLotteryWarmupEvents(input.type, 60);
+      return { events: rows, newEvents };
+    }),
+
+  // Fase 28: simulador de aposta manual contra o histórico real
+  simulateBet: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES), numbers: z.array(z.number().int().min(1).max(100)), limit: z.number().int().min(12).max(2000).optional() }))
+    .query(async ({ input }) => {
+      const rows = await listLotteryDraws(input.type, 2000);
+      if (rows.length < 12) {
+        throw new TRPCError(
+          { code: "NOT_FOUND", message: `Histórico insuficiente para simular a aposta na ${LOTTERY_LABELS[input.type]} (${rows.length} concursos; preciso de pelo menos 12).` },
+        );
+      }
+      if (!validateNumbers(input.type as LotteryType, input.numbers)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Dezenas inválidas para esta loteria (range ou quantidade)." });
+      }
+      return simulateBet(input.type, rows, input.numbers, { limit: input.limit });
+    }),
+
+  // Fase 28: relatório semanal consolidado (aquecimentos + confiança + métodos)
+  weeklyReport: publicProcedure
+    .input(z.object({ type: z.enum(LOTTERY_TYPES).optional() }))
+    .query(async ({ input }) => {
+      const types = input.type ? [input.type] : LOTTERY_TYPES;
+      const drawsByType: Partial<Record<LotteryType, NonNullable<Awaited<ReturnType<typeof listLotteryDraws>>>>> = {};
+      for (const t of types) {
+        const rows = await listLotteryDraws(t, 2000);
+        if (rows.length >= 12) drawsByType[t] = rows;
+      }
+      if (Object.keys(drawsByType).length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Nenhuma loteria com histórico suficiente para o relatório (mínimo 12 concursos)." });
+      }
+      const weightsByType: Partial<Record<string, LstmWeights>> = {};
+      const models = await listLotteryModels();
+      const readyByType: Record<string, { weightsKey: string | null }> = {};
+      for (const m of models) {
+        if (m.status === "ready" && m.weightsKey && !readyByType[m.lotteryType]) readyByType[m.lotteryType] = { weightsKey: m.weightsKey };
+      }
+      for (const t of Object.keys(drawsByType)) {
+        const cached = getCachedLstmWeights(t as LotteryType);
+        if (cached) {
+          weightsByType[t] = cached;
+        } else if (readyByType[t]?.weightsKey) {
+          try {
+            const url = await storageGet(readyByType[t].weightsKey);
+            const res = await fetch(url.url);
+            weightsByType[t] = ((await res.json()) as LstmWeights) ?? null;
+          } catch { /* sem pesos */ }
+        }
+      }
+      return weeklyReportPayload(drawsByType as Record<LotteryType, NonNullable<typeof drawsByType["megasena"]>>, weightsByType);
     }),
 
   // Previsão LSTM: combina o modelo treinado com o histórico real
